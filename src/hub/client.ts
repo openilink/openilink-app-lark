@@ -1,7 +1,7 @@
 import type { ToolDefinition } from "./types.js";
 
 /**
- * Hub Bot API 客户端 - 用于通过 Hub 向微信用户发送消息、同步工具定义
+ * Hub Bot API 客户端 - 用于通过 Hub 向用户发送消息、同步工具定义
  */
 export class HubClient {
   private hubUrl: string;
@@ -38,73 +38,31 @@ export class HubClient {
   }
 
   /**
-   * 发送文本消息
-   * @param to 目标微信用户 ID
-   * @param text 文本内容
-   * @param traceId 可选的追踪 ID
-   */
-  async sendText(to: string, text: string, traceId?: string): Promise<void> {
-    await this.sendMessage(to, "text", text, traceId);
-  }
-
-  /**
-   * 发送图片消息（base64 或 URL）
-   * @param to 目标微信用户 ID
-   * @param imageUrl 图片 URL 或 base64 数据
-   * @param traceId 可选的追踪 ID
-   */
-  async sendImage(to: string, imageUrl: string, traceId?: string): Promise<void> {
-    await this.sendMessage(to, "image", imageUrl, traceId);
-  }
-
-  /**
-   * 发送文件消息
-   * @param to 目标微信用户 ID
-   * @param fileUrl 文件 URL
-   * @param fileName 文件名
-   * @param traceId 可选的追踪 ID
-   */
-  async sendFile(
-    to: string,
-    fileUrl: string,
-    fileName: string,
-    traceId?: string,
-  ): Promise<void> {
-    const content = JSON.stringify({ url: fileUrl, name: fileName });
-    await this.sendMessage(to, "file", content, traceId);
-  }
-
-  /**
-   * 通用消息发送方法
-   * @param to 目标微信用户 ID
-   * @param type 消息类型（text / image / file 等）
-   * @param content 消息内容
-   * @param traceId 可选的追踪 ID
+   * 发送消息（通用方法）
+   * POST {hubUrl}/bot/v1/message/send
    */
   async sendMessage(
     to: string,
     type: string,
     content: string,
-    traceId?: string,
+    options?: { url?: string; base64?: string; filename?: string; traceId?: string },
   ): Promise<void> {
-    const url = `${this.hubUrl}/api/bot/send`;
+    const url = `${this.hubUrl}/bot/v1/message/send`;
 
-    const payload: Record<string, string> = {
-      to,
-      type,
-      content,
-    };
-    if (traceId) {
-      payload.trace_id = traceId;
-    }
+    const body: Record<string, string> = { to, type, content };
+    if (options?.url) body.url = options.url;
+    if (options?.base64) body.base64 = options.base64;
+    if (options?.filename) body.filename = options.filename;
+    if (options?.traceId) body.trace_id = options.traceId;
 
     const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${this.appToken}`,
+        ...(options?.traceId ? { "X-Trace-Id": options.traceId } : {}),
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(30_000),
     });
 
@@ -114,5 +72,31 @@ export class HubClient {
         `[hub-client] 发送消息失败: ${res.status} ${res.statusText} - ${errText}`,
       );
     }
+  }
+
+  /**
+   * 发送文本消息
+   */
+  async sendText(to: string, text: string, traceId?: string): Promise<void> {
+    await this.sendMessage(to, "text", text, { traceId });
+  }
+
+  /**
+   * 发送图片消息
+   */
+  async sendImage(to: string, url: string, traceId?: string): Promise<void> {
+    await this.sendMessage(to, "image", "", { url, traceId });
+  }
+
+  /**
+   * 发送文件消息
+   */
+  async sendFile(
+    to: string,
+    fileUrl: string,
+    fileName: string,
+    traceId?: string,
+  ): Promise<void> {
+    await this.sendMessage(to, "file", "", { url: fileUrl, filename: fileName, traceId });
   }
 }

@@ -72,12 +72,14 @@ export interface ToolContext {
 export interface ToolResult {
   /** 回复文本 */
   reply: string;
-  /** 媒体类型，不传表示纯文本 */
-  type?: "image";
+  /** 媒体类型: "image" | "video" | "file"，不传表示纯文本 */
+  type?: string;
   /** 媒体 URL */
   url?: string;
-  /** 媒体 base64 数据 (data:image/png;base64,...) */
+  /** 媒体 base64 数据 */
   base64?: string;
+  /** 文件名 */
+  name?: string;
 }
 
 /** Tool 处理函数 - 返回字符串（纯文本）或 ToolResult（支持媒体） */

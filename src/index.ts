@@ -70,15 +70,20 @@ async function main(): Promise<void> {
           // 异步推送回调 - 命令超时后通过 Bot API 推送结果
           onAsyncPush: async (result, event, installation) => {
             const hubClient = new HubClient(installation.hubUrl, installation.appToken);
-            const userId = event.event?.data.user_id ?? event.event?.data.from ?? "";
-            if (!userId) return;
+            const data = event.event?.data ?? {};
+            const to = (data.group?.id ?? data.sender?.id ?? data.user_id ?? data.from ?? "") as string;
+            if (!to) return;
+            const traceId = event.trace_id;
             try {
-              if (result.type === "image" && (result.url || result.base64)) {
-                await hubClient.sendImage(userId, result.url || result.base64!, event.trace_id);
-              }
-              // 始终发送文本回复
-              if (result.reply) {
-                await hubClient.sendText(userId, result.reply, event.trace_id);
+              if (typeof result === "string") {
+                await hubClient.sendText(to, result, traceId);
+              } else {
+                await hubClient.sendMessage(to, result.type ?? "text", result.reply, {
+                  url: result.url,
+                  base64: result.base64,
+                  filename: result.name,
+                  traceId,
+                });
               }
             } catch (err) {
               console.error("[main] 异步推送命令结果失败:", err);
