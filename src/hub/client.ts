@@ -1,5 +1,7 @@
+import type { ToolDefinition } from "./types.js";
+
 /**
- * Hub Bot API 客户端 - 用于通过 Hub 向微信用户发送消息
+ * Hub Bot API 客户端 - 用于通过 Hub 向微信用户发送消息、同步工具定义
  */
 export class HubClient {
   private hubUrl: string;
@@ -8,6 +10,31 @@ export class HubClient {
   constructor(hubUrl: string, appToken: string) {
     this.hubUrl = hubUrl;
     this.appToken = appToken;
+  }
+
+  /**
+   * 将工具定义同步注册到 Hub
+   * PUT {hubUrl}/bot/v1/app/tools
+   */
+  async syncTools(tools: ToolDefinition[]): Promise<void> {
+    const url = `${this.hubUrl}/bot/v1/app/tools`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.appToken}`,
+      },
+      body: JSON.stringify({ tools }),
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(
+        `[hub-client] 同步工具定义失败: ${res.status} ${res.statusText} - ${errText}`,
+      );
+    }
+    console.log(`[hub-client] 工具定义同步成功, 共 ${tools.length} 个工具`);
   }
 
   /**

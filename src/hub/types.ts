@@ -68,5 +68,17 @@ export interface ToolContext {
   args: Record<string, any>;
 }
 
-/** Tool 处理函数 */
-export type ToolHandler = (ctx: ToolContext) => Promise<string>;
+/** Tool 执行结果 - 支持纯文本和媒体类型 */
+export interface ToolResult {
+  /** 回复文本 */
+  reply: string;
+  /** 媒体类型，不传表示纯文本 */
+  type?: "image";
+  /** 媒体 URL */
+  url?: string;
+  /** 媒体 base64 数据 (data:image/png;base64,...) */
+  base64?: string;
+}
+
+/** Tool 处理函数 - 返回字符串（纯文本）或 ToolResult（支持媒体） */
+export type ToolHandler = (ctx: ToolContext) => Promise<string | ToolResult>;

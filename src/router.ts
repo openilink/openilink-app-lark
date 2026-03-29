@@ -2,7 +2,7 @@
  * 命令/Tool Call 路由分发器
  * 根据 Hub 推送的 command 事件，查找对应 handler 并执行
  */
-import type { HubEvent, Installation, ToolHandler, ToolContext } from "./hub/types.js";
+import type { HubEvent, Installation, ToolHandler, ToolContext, ToolResult } from "./hub/types.js";
 import type { HubClient } from "./hub/client.js";
 
 export class Router {
@@ -17,13 +17,13 @@ export class Router {
    * @param event Hub 事件
    * @param installation 安装信息
    * @param hubClient Hub 客户端（可用于回复消息）
-   * @returns 同步回复内容，null 表示不处理
+   * @returns 同步回复内容（字符串或 ToolResult），null 表示不处理
    */
   async handleCommand(
     event: HubEvent,
     installation: Installation,
     hubClient: HubClient,
-  ): Promise<string | null> {
+  ): Promise<string | ToolResult | null> {
     // event.event 在回调链路中一定存在（url_verification 已提前处理）
     if (!event.event) return null;
 

@@ -53,32 +53,37 @@ async function main(): Promise<void> {
     try {
       // POST /hub/webhook - Hub 事件推送
       if (method === "POST" && pathname === "/hub/webhook") {
-        await handleWebhook(req, res, store, async (event, installation) => {
-          // url_verification 类型已在 webhook.ts 中处理，此处 event.event 一定存在
-          if (!event.event) return;
-
-          const eventType = event.event.type;
-
-          if (eventType === "command") {
-            // 命令事件 - 路由到 tool handler
+        await handleWebhook(req, res, store, {
+          // 命令事件 - 路由到 tool handler，支持同步/异步响应
+          onCommand: async (event, installation) => {
+            if (!event.event) return null;
             const hubClient = new HubClient(installation.hubUrl, installation.appToken);
-            const result = await router.handleCommand(event, installation, hubClient);
-
-            if (result) {
-              // 将结果通过 Hub 回复给用户
-              const userId = event.event.data.user_id ?? event.event.data.from ?? "";
-              if (userId) {
-                try {
-                  await hubClient.sendText(userId, result, event.trace_id);
-                } catch (err) {
-                  console.error("[main] 回复命令结果失败:", err);
-                }
-              }
+            return router.handleCommand(event, installation, hubClient);
+          },
+          // 非命令事件（消息桥接等）
+          onEvent: async (event, installation) => {
+            if (!event.event) return;
+            if (event.event.type.startsWith("message.")) {
+              await wxToLark.handleWxEvent(event, installation);
             }
-          } else if (eventType.startsWith("message.")) {
-            // 消息事件 - 转发到飞书
-            await wxToLark.handleWxEvent(event, installation);
-          }
+          },
+          // 异步推送回调 - 命令超时后通过 Bot API 推送结果
+          onAsyncPush: async (result, event, installation) => {
+            const hubClient = new HubClient(installation.hubUrl, installation.appToken);
+            const userId = event.event?.data.user_id ?? event.event?.data.from ?? "";
+            if (!userId) return;
+            try {
+              if (result.type === "image" && (result.url || result.base64)) {
+                await hubClient.sendImage(userId, result.url || result.base64!, event.trace_id);
+              }
+              // 始终发送文本回复
+              if (result.reply) {
+                await hubClient.sendText(userId, result.reply, event.trace_id);
+              }
+            } catch (err) {
+              console.error("[main] 异步推送命令结果失败:", err);
+            }
+          },
         });
         return;
       }
@@ -89,9 +94,9 @@ async function main(): Promise<void> {
         return;
       }
 
-      // GET /oauth/redirect - OAuth 回调
+      // GET /oauth/redirect - OAuth 回调（完成后自动同步工具定义到 Hub）
       if (method === "GET" && pathname === "/oauth/redirect") {
-        await handleOAuthRedirect(req, res, config, store);
+        await handleOAuthRedirect(req, res, config, store, definitions);
         return;
       }
 

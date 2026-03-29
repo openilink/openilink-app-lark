@@ -2,7 +2,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { generatePKCE } from "../utils/crypto.js";
 import type { Config } from "../config.js";
 import type { Store } from "../store.js";
-import type { OAuthExchangeResult } from "./types.js";
+import type { OAuthExchangeResult, ToolDefinition } from "./types.js";
+import { HubClient } from "./client.js";
 
 /** PKCE 缓存条目 */
 interface PKCEEntry {
@@ -79,6 +80,7 @@ export function handleOAuthSetup(
 
 /**
  * 处理 OAuth 安装流程第二步：用授权码 + code_verifier 换取凭证并保存
+ * 拿到 app_token 后，会自动将所有工具定义同步注册到 Hub
  * 路由: GET /oauth/redirect
  */
 export async function handleOAuthRedirect(
@@ -86,6 +88,7 @@ export async function handleOAuthRedirect(
   res: ServerResponse,
   config: Config,
   store: Store,
+  toolDefinitions?: ToolDefinition[],
 ): Promise<void> {
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
   const params = url.searchParams;
@@ -145,6 +148,17 @@ export async function handleOAuthRedirect(
     });
 
     console.log("[oauth] 安装成功, installation_id:", result.installation_id);
+
+    // OAuth 成功后，同步工具定义到 Hub
+    if (toolDefinitions && toolDefinitions.length > 0) {
+      try {
+        const hubClient = new HubClient(config.hubUrl, result.app_token);
+        await hubClient.syncTools(toolDefinitions);
+        console.log("[oauth] 工具定义同步完成");
+      } catch (err) {
+        console.error("[oauth] 工具定义同步失败:", err);
+      }
+    }
 
     // 返回成功页面
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
