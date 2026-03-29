@@ -51,7 +51,7 @@ export class Router {
     const ctx: ToolContext = {
       installationId: installation.id,
       botId: event.bot.id,
-      userId: data.user_id ?? data.from ?? "",
+      userId: data.sender?.id ?? data.user_id ?? data.from ?? "",
       traceId: event.trace_id,
       args,
     };
