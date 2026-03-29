@@ -63,22 +63,27 @@ function createHandlers(client: lark.Client): Map<string, ToolHandler> {
     try {
       const { summary, due, description } = ctx.args;
 
-      const data: any = { summary };
+      const data: any = {
+        summary,
+        // origin 为创建任务的必填参数，标识任务来源
+        origin: {
+          platform_i18n_name: "OpeniLink",
+        },
+      };
       if (description) {
         data.description = description;
       }
       if (due) {
-        // 飞书 Task V2 截止时间格式为时间戳
+        // 飞书 Task API 截止时间字段为 time（而非 timestamp），格式为秒级时间戳字符串
         data.due = {
-          timestamp: String(
+          time: String(
             Math.floor(new Date(due).getTime() / 1000),
           ),
           is_all_day: false,
         };
       }
 
-      // 优先尝试 Task V2 API: client.task.task.create
-      // TODO: 待确认 SDK API 路径，v2 版本可能是 client.task.v2.task.create 或 client.task.task.create
+      // 优先尝试 Task API: client.task.task.create
       let resp: any = null;
       try {
         resp = await (client.task as any).task?.create?.({

@@ -45,8 +45,7 @@ const definitions: ToolDefinition[] = [
 function createHandlers(client: lark.Client): Map<string, ToolHandler> {
   const handlers = new Map<string, ToolHandler>();
 
-  // 查看会议记录
-  // TODO: 待确认 SDK API 路径，当前为推测。可能是 client.vc.meeting.list 或 client.vc.meetingList.get
+  // 查看会议记录 - 使用 vc.meetingList.get 替代不存在的 vc.meeting.list
   handlers.set("list_meetings", async (ctx) => {
     const startTime: string = ctx.args.start_time ?? "";
     const endTime: string = ctx.args.end_time ?? "";
@@ -56,7 +55,7 @@ function createHandlers(client: lark.Client): Map<string, ToolHandler> {
       if (startTime) params.start_time = startTime;
       if (endTime) params.end_time = endTime;
 
-      const res = await (client as any).vc?.meeting?.list?.({
+      const res = await (client as any).vc?.meetingList?.get?.({
         params,
       });
 
@@ -82,18 +81,18 @@ function createHandlers(client: lark.Client): Map<string, ToolHandler> {
     }
   });
 
-  // 获取会议纪要
-  // TODO: 待确认 SDK API 路径，当前为推测。会议信息和纪要可能分别在不同接口
+  // 获取会议纪要 - 会议纪要通过文档 API 获取，此处返回提示
   handlers.set("get_meeting_summary", async (ctx) => {
     const meetingId: string = ctx.args.meeting_id ?? "";
 
     try {
+      // 先尝试获取会议基本信息
       const res = await (client as any).vc?.meeting?.get?.({
         path: { meeting_id: meetingId },
       });
 
       if (!res || res.code !== 0) {
-        return `获取会议纪要失败: ${res?.msg || "视频会议 API 不可用，请确认权限配置"}`;
+        return `获取会议信息失败: ${res?.msg || "视频会议 API 不可用，请确认权限配置"}`;
       }
 
       const meeting = res?.data?.meeting ?? {};
@@ -101,33 +100,17 @@ function createHandlers(client: lark.Client): Map<string, ToolHandler> {
       const startTime = meeting.start_time ?? "未知";
       const endTime = meeting.end_time ?? "未知";
 
-      // 尝试获取纪要内容
-      // TODO: 待确认 SDK API 路径，会议纪要可能在 client.vc.meetingMinute 下
-      let summaryText = "暂无会议纪要";
-      try {
-        const summaryRes = await (client as any).vc?.meetingMinute?.get?.({
-          path: { meeting_id: meetingId },
-        });
-        if (summaryRes?.code === 0) {
-          summaryText =
-            summaryRes?.data?.minute?.content ?? "暂无会议纪要";
-        }
-      } catch {
-        // 纪要接口可能不可用，使用默认值
-      }
-
       const lines = [
         `会议主题: ${topic}`,
         `会议 ID: ${meetingId}`,
         `开始时间: ${startTime}`,
         `结束时间: ${endTime}`,
         `---`,
-        `会议纪要:`,
-        summaryText,
+        `会议纪要: 会议纪要通过文档 API 获取，请使用 read_doc 工具并传入会议纪要对应的文档 ID 来获取纪要内容。`,
       ];
       return lines.join("\n");
     } catch (err: any) {
-      return `获取会议纪要失败: ${err.message ?? err}`;
+      return `获取会议信息失败: ${err.message ?? err}`;
     }
   });
 

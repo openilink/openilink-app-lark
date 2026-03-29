@@ -1,11 +1,14 @@
 /**
  * 电子表格 Tools
  * 提供飞书电子表格（Sheets）数据读取、写入、追加能力
- * 注意: SDK 中 sheets 的 API 路径不确定，当前使用 (client as any) 调用
+ * 注意: SDK 不直接支持 sheets v2 API，通过 fetch 调用飞书 HTTP API
  */
 import type * as lark from "@larksuiteoapi/node-sdk";
 import type { ToolDefinition, ToolHandler } from "../hub/types.js";
 import type { ToolModule } from "./index.js";
+
+/** 飞书 Sheets API 基础地址 */
+const SHEETS_API_BASE = "https://open.feishu.cn/open-apis/sheets/v2/spreadsheets";
 
 /** 电子表格模块 tool 定义列表 */
 const definitions: ToolDefinition[] = [
@@ -81,27 +84,44 @@ const definitions: ToolDefinition[] = [
   },
 ];
 
+/**
+ * 从 SDK client 中获取 tenant_access_token
+ * 通过内部 tokenManager 获取，用于直接调用飞书 HTTP API
+ */
+async function getTenantToken(client: lark.Client): Promise<string> {
+  const token = await (client as any).tokenManager?.getTenantAccessToken?.();
+  if (!token) {
+    throw new Error("无法获取 tenant_access_token，请检查应用凭证配置");
+  }
+  return token;
+}
+
 /** 创建电子表格模块的 handler 映射 */
 function createHandlers(client: lark.Client): Map<string, ToolHandler> {
   const handlers = new Map<string, ToolHandler>();
 
-  // 读取表格
-  // TODO: 待确认 SDK API 路径，当前为推测。可能是 client.sheets.spreadsheetSheetValue 或其他路径
+  // 读取表格 - 通过飞书 HTTP API 直接调用
   handlers.set("read_sheet", async (ctx) => {
     const token: string = ctx.args.spreadsheet_token ?? "";
     const range: string = ctx.args.range ?? "";
 
     try {
-      const res = await (client as any).sheets.spreadsheetSheetValue.get({
-        path: { spreadsheet_token: token },
-        params: { range },
+      const accessToken = await getTenantToken(client);
+      const url = `${SHEETS_API_BASE}/${token}/values/${encodeURIComponent(range)}`;
+      const res = await fetch(url, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
       });
 
-      if (res?.code !== 0) {
-        return `读取表格失败: ${res?.msg || "API 调用失败"}`;
+      const data = await res.json() as any;
+      if (data?.code !== 0) {
+        return `读取表格失败: ${data?.msg || "API 调用失败"}`;
       }
 
-      const values = res?.data?.valueRange?.values ?? [];
+      const values = data?.data?.valueRange?.values ?? [];
       if (values.length === 0) {
         return `表格 ${token} 范围 ${range} 无数据`;
       }
@@ -116,8 +136,7 @@ function createHandlers(client: lark.Client): Map<string, ToolHandler> {
     }
   });
 
-  // 写入表格
-  // TODO: 待确认 SDK API 路径，当前为推测
+  // 写入表格 - 通过飞书 HTTP API 直接调用
   handlers.set("write_sheet", async (ctx) => {
     const token: string = ctx.args.spreadsheet_token ?? "";
     const range: string = ctx.args.range ?? "";
@@ -131,15 +150,22 @@ function createHandlers(client: lark.Client): Map<string, ToolHandler> {
     }
 
     try {
-      const res = await (client as any).sheets.spreadsheetSheetValue.update({
-        path: { spreadsheet_token: token },
-        data: {
-          valueRange: { range, values },
+      const accessToken = await getTenantToken(client);
+      const url = `${SHEETS_API_BASE}/${token}/values`;
+      const res = await fetch(url, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
         },
+        body: JSON.stringify({
+          valueRange: { range, values },
+        }),
       });
 
-      if (res?.code !== 0) {
-        return `写入表格失败: ${res?.msg || "API 调用失败"}`;
+      const data = await res.json() as any;
+      if (data?.code !== 0) {
+        return `写入表格失败: ${data?.msg || "API 调用失败"}`;
       }
 
       return `成功写入 ${values.length} 行数据到 ${range}`;
@@ -148,8 +174,7 @@ function createHandlers(client: lark.Client): Map<string, ToolHandler> {
     }
   });
 
-  // 追加数据
-  // TODO: 待确认 SDK API 路径，当前为推测
+  // 追加数据 - 通过飞书 HTTP API 直接调用
   handlers.set("append_sheet", async (ctx) => {
     const token: string = ctx.args.spreadsheet_token ?? "";
     const range: string = ctx.args.range ?? "";
@@ -163,15 +188,22 @@ function createHandlers(client: lark.Client): Map<string, ToolHandler> {
     }
 
     try {
-      const res = await (client as any).sheets.spreadsheetSheetValue.append({
-        path: { spreadsheet_token: token },
-        data: {
-          valueRange: { range, values },
+      const accessToken = await getTenantToken(client);
+      const url = `${SHEETS_API_BASE}/${token}/values_append`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
         },
+        body: JSON.stringify({
+          valueRange: { range, values },
+        }),
       });
 
-      if (res?.code !== 0) {
-        return `追加数据失败: ${res?.msg || "API 调用失败"}`;
+      const data = await res.json() as any;
+      if (data?.code !== 0) {
+        return `追加数据失败: ${data?.msg || "API 调用失败"}`;
       }
 
       return `成功追加 ${values.length} 行数据到 ${range}`;

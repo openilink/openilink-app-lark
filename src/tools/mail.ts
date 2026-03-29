@@ -17,6 +17,10 @@ const definitions: ToolDefinition[] = [
       type: "object",
       properties: {
         count: { type: "number", description: "返回邮件数量，默认 10" },
+        user_mailbox_id: {
+          type: "string",
+          description: "用户邮箱 ID，默认 'me'（可选）",
+        },
       },
     },
   },
@@ -30,6 +34,10 @@ const definitions: ToolDefinition[] = [
         to: { type: "string", description: "收件人邮箱地址" },
         subject: { type: "string", description: "邮件主题" },
         body: { type: "string", description: "邮件正文内容" },
+        user_mailbox_id: {
+          type: "string",
+          description: "用户邮箱 ID，默认 'me'（可选）",
+        },
       },
       required: ["to", "subject", "body"],
     },
@@ -52,14 +60,18 @@ const definitions: ToolDefinition[] = [
 function createHandlers(client: lark.Client): Map<string, ToolHandler> {
   const handlers = new Map<string, ToolHandler>();
 
-  // 查看邮件
-  // TODO: 待确认 SDK API 路径，当前为推测。可能是 client.mail.userMailboxMessage 或 client.mail.mailbox.message
+  // 查看邮件 - 添加必填的 path.user_mailbox_id 和 params.folder_id
   handlers.set("list_mails", async (ctx) => {
     const count: number = ctx.args.count ?? 10;
+    const userMailboxId: string = ctx.args.user_mailbox_id ?? "me";
 
     try {
       const res = await (client as any).mail?.userMailboxMessage?.list?.({
-        params: { page_size: count },
+        path: { user_mailbox_id: userMailboxId },
+        params: {
+          page_size: count,
+          folder_id: "INBOX", // 收件箱文件夹
+        },
       });
 
       if (!res || res.code !== 0) {
@@ -83,63 +95,47 @@ function createHandlers(client: lark.Client): Map<string, ToolHandler> {
     }
   });
 
-  // 发送邮件
-  // TODO: 待确认 SDK API 路径，当前为推测
+  // 发送邮件 - 使用 send 方法而非 create
   handlers.set("send_mail", async (ctx) => {
     const to: string = ctx.args.to ?? "";
     const subject: string = ctx.args.subject ?? "";
     const body: string = ctx.args.body ?? "";
+    const userMailboxId: string = ctx.args.user_mailbox_id ?? "me";
 
     try {
-      const res = await (client as any).mail?.userMailboxMessage?.create?.({
-        data: {
-          subject,
-          body: {
-            content: body,
+      // 尝试使用 send 方法发送邮件
+      const sendFn = (client as any).mail?.userMailboxMessage?.send;
+      if (typeof sendFn === "function") {
+        const res = await sendFn({
+          path: { user_mailbox_id: userMailboxId },
+          data: {
+            subject,
+            body: {
+              content: body,
+            },
+            to: [{ email_address: to }],
           },
-          to: [{ email_address: to }],
-        },
-      });
+        });
 
-      if (!res || res.code !== 0) {
-        return `发送邮件失败: ${res?.msg || "邮箱 API 不可用，请确认权限配置"}`;
+        if (!res || res.code !== 0) {
+          return `发送邮件失败: ${res?.msg || "邮箱 API 不可用，请确认权限配置"}`;
+        }
+
+        return `邮件已发送至 ${to}，主题: ${subject}`;
       }
 
-      return `邮件已发送至 ${to}，主题: ${subject}`;
+      // send 方法不可用时返回提示
+      return "邮件发送功能当前不可用。飞书邮箱发送 API 在当前 SDK 版本中可能未直接暴露，请通过飞书客户端发送邮件。";
     } catch (err: any) {
       return `发送邮件失败: ${err.message ?? err}`;
     }
   });
 
   // 搜索邮件
-  // TODO: 待确认 SDK API 路径，当前为推测
+  // 邮件搜索功能依赖特定 API，当前 SDK 可能不直接支持
   handlers.set("search_mail", async (ctx) => {
-    const query: string = ctx.args.query ?? "";
-
-    try {
-      const res = await (client as any).mail?.userMailboxMessage?.list?.({
-        params: { search_key: query },
-      });
-
-      if (!res || res.code !== 0) {
-        return `搜索邮件失败: ${res?.msg || "邮箱 API 不可用，请确认权限配置"}`;
-      }
-
-      const messages = res?.data?.items ?? [];
-      if (messages.length === 0) {
-        return `未找到与"${query}"相关的邮件`;
-      }
-
-      const lines = messages.map((m: any, i: number) => {
-        const subject = m.subject ?? "（无主题）";
-        const from = m.from?.email_address ?? "未知发件人";
-        const date = m.date ?? "未知时间";
-        return `${i + 1}. [${date}] ${from}: ${subject}`;
-      });
-      return `搜索到 ${messages.length} 封相关邮件:\n${lines.join("\n")}`;
-    } catch (err: any) {
-      return `搜索邮件失败: ${err.message ?? err}`;
-    }
+    const { query } = ctx.args;
+    return `邮件搜索功能当前暂不支持。飞书邮箱搜索需要使用专用搜索 API，当前 SDK 未直接暴露该接口。请通过飞书客户端搜索关键词"${query}"。`;
   });
 
   return handlers;

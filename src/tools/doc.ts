@@ -81,21 +81,25 @@ function createHandlers(client: lark.Client): Map<string, ToolHandler> {
       const docId = resp.data?.document?.document_id;
       const docUrl = (resp.data?.document as any)?.url || "";
 
-      // 如果提供了内容，通过 documentBlock 创建文档正文 block
+      // 如果提供了内容，通过 documentBlockChildren 在文档根节点下创建文本 block
       if (content && docId) {
         try {
-          await (client.docx.documentBlock as any).create({
-            path: { document_id: docId },
+          await client.docx.documentBlockChildren.create({
+            path: { document_id: docId, block_id: docId },
             params: { document_revision_id: -1 },
             data: {
-              block_type: 2, // text block
-              text: {
-                elements: [
-                  {
-                    text_run: { content },
+              children: [
+                {
+                  block_type: 2, // 文本 block
+                  text: {
+                    elements: [
+                      {
+                        text_run: { content },
+                      },
+                    ],
                   },
-                ],
-              },
+                },
+              ],
             },
           });
         } catch {
@@ -133,39 +137,10 @@ function createHandlers(client: lark.Client): Map<string, ToolHandler> {
   });
 
   // 搜索文档
-  // TODO: 飞书搜索 API 在 SDK 中可能位于 client.search 命名空间，但 SDK 未直接暴露该接口
+  // 文档搜索需要使用飞书搜索 API，当前 SDK 不直接支持此功能
   handlers.set("search_doc", async (ctx) => {
-    try {
-      const { query, count = 10 } = ctx.args;
-
-      // TODO: 待确认 SDK API 路径，当前为推测。搜索 API 可能在 client.search 下
-      const resp = await (client as any).search?.message?.create?.({
-        data: {
-          query,
-          page_size: Math.min(count, 50),
-        },
-      });
-
-      if (!resp || resp.code !== 0) {
-        return `文档搜索功能当前暂不可用（SDK 未直接暴露搜索接口）。请通过飞书客户端搜索关键词"${query}"。`;
-      }
-
-      const items = resp.data?.items ?? [];
-      if (items.length === 0) {
-        return `未找到包含"${query}"的文档`;
-      }
-
-      const lines = items.map((doc: any, i: number) => {
-        const title = doc.title || "（无标题）";
-        const docType = doc.docs_type || "unknown";
-        const url = doc.url || "";
-        return `${i + 1}. [${docType}] ${title}${url ? "\n   链接: " + url : ""}`;
-      });
-
-      return `搜索"${query}"的结果（共 ${items.length} 条）:\n${lines.join("\n")}`;
-    } catch (err: any) {
-      return `搜索文档出错: ${err.message || err}`;
-    }
+    const { query } = ctx.args;
+    return `文档搜索需要使用飞书搜索 API（suite_search），当前 SDK 暂不支持此功能。请通过飞书客户端搜索关键词"${query}"。`;
   });
 
   return handlers;
