@@ -1,0 +1,18 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8081:8081"
+    environment:
+      HUB_URL: "${HUB_URL}"
+      BASE_URL: "${BASE_URL}"
+      LARK_APP_ID: "${LARK_APP_ID}"
+      LARK_APP_SECRET: "${LARK_APP_SECRET}"
+      LARK_CHAT_ID: "${LARK_CHAT_ID:-}"
+      DB_PATH: /data/lark.db
+    volumes:
+      - app-data:/data
+    restart: unless-stopped
+
+volumes:
+  app-data:
