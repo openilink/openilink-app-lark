@@ -102,7 +102,7 @@ export async function handleOAuthSetup(
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
-    .card { background: white; border-radius: 12px; padding: 32px; max-width: 420px; width: 100%; box-shadow: 0 2px 12px rgba(0,0,0,0.1); }
+    .card { background: white; border-radius: 12px; padding: 32px; max-width: 560px; width: 100%; box-shadow: 0 2px 12px rgba(0,0,0,0.1); }
     h1 { font-size: 20px; margin-bottom: 4px; }
     .desc { color: #666; font-size: 14px; margin-bottom: 24px; }
     label { display: block; font-size: 14px; font-weight: 500; margin-bottom: 6px; color: #333; }
@@ -118,31 +118,98 @@ export async function handleOAuthSetup(
     .security-notice ul { padding-left: 20px; margin: 0; }
     .security-notice li { margin-bottom: 4px; }
     .security-notice a { color: #3370ff; }
+    .steps { background: #fafafa; border: 1px solid #eee; border-radius: 8px; padding: 16px 20px; margin-bottom: 24px; }
+    .steps h2 { font-size: 15px; margin-bottom: 10px; color: #333; }
+    .steps ol { padding-left: 20px; font-size: 13px; color: #555; line-height: 1.8; margin-bottom: 12px; }
+    .steps ol li { margin-bottom: 8px; }
+    .steps ul { padding-left: 16px; margin: 4px 0 8px; }
+    .steps code { background: #e8edf3; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+    .steps-hint { font-size: 12px; color: #888; margin-top: 12px; padding-top: 8px; border-top: 1px solid #eee; }
+    .scope-box { background: #1e1e1e; border-radius: 8px; margin: 8px 0 16px; overflow: hidden; }
+    .scope-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: #2d2d2d; color: #aaa; font-size: 12px; }
+    .copy-btn { background: #3370ff; color: white; border: none; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+    .copy-btn:hover { background: #2860e0; }
+    .scope-box pre { color: #d4d4d4; padding: 12px; margin: 0; font-size: 11px; line-height: 1.5; overflow-x: auto; white-space: pre; font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace; }
+    h2 { font-size: 16px; margin: 20px 0 12px; color: #333; }
   </style>
 </head>
 <body>
   <div class="card">
-    <h1>飞书 Bridge</h1>
-    <p class="desc">请填写您的飞书应用凭证，用于连接飞书 API</p>
+    <h1>🔗 飞书 Bridge — 连接配置</h1>
+    <p class="desc">将微信消息双向转发到飞书，需要先创建飞书应用获取凭证</p>
+
+    <div class="steps">
+      <h2>📋 配置步骤</h2>
+      <ol>
+        <li>打开 <a href="https://open.feishu.cn/app" target="_blank">飞书开发者后台</a>，点击<strong>「创建企业自建应用」</strong>，填写名称后创建</li>
+        <li>进入应用 →<strong>「凭证与基础信息」</strong>→ 复制 <strong>App ID</strong> 和 <strong>App Secret</strong></li>
+        <li><strong>「权限管理」</strong>→ 点击<strong>「批量开通」</strong>→ 粘贴以下权限 JSON → 确认开通：</li>
+      </ol>
+
+      <div class="scope-box">
+        <div class="scope-header">
+          <span>权限配置（点击复制）</span>
+          <button type="button" class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('scope-json').textContent).then(()=>{this.textContent='已复制 ✓';setTimeout(()=>{this.textContent='复制'},1500)})">复制</button>
+        </div>
+        <pre id="scope-json">{
+  "scopes": {
+    "tenant": [
+      "im:message",
+      "im:message:send_as_bot",
+      "im:message.p2p_msg:readonly",
+      "im:message.group_at_msg:readonly",
+      "im:chat",
+      "im:chat:readonly",
+      "im:chat:create",
+      "im:resource",
+      "calendar:calendar",
+      "calendar:calendar:readonly",
+      "docx:document",
+      "docx:document:readonly",
+      "bitable:app",
+      "bitable:app:readonly",
+      "sheets:spreadsheet",
+      "sheets:spreadsheet:readonly",
+      "task:task",
+      "task:task:readonly",
+      "contact:user.base:readonly",
+      "contact:user.employee_id:readonly",
+      "drive:drive:readonly",
+      "drive:file",
+      "wiki:wiki:readonly",
+      "vc:meeting:readonly"
+    ]
+  }
+}</pre>
+      </div>
+
+      <ol start="4">
+        <li><strong>「事件与回调」</strong>→ 订阅方式选<strong>「长连接」</strong>→ 添加事件 <code>im.message.receive_v1</code></li>
+        <li><strong>「版本管理与发布」</strong>→ 创建版本并发布</li>
+      </ol>
+      <p class="steps-hint">💡 群聊 ID：飞书群设置页面查看，<code>oc_</code> 开头</p>
+    </div>
+
     <form method="POST" action="/oauth/setup?hub=${encodeURIComponent(hub)}&app_id=${encodeURIComponent(appId)}&bot_id=${encodeURIComponent(botId)}&state=${encodeURIComponent(state)}&return_url=${encodeURIComponent(returnUrl)}">
+      <h2>🔑 填写凭证</h2>
+
       <label class="required">飞书 App ID</label>
-      <input name="lark_app_id" placeholder="cli_xxxxxxxxxxxxxxxx" required />
-      <p class="hint">在 <a href="https://open.feishu.cn/app" target="_blank">飞书开发者后台</a> 创建应用后获取</p>
+      <input name="lark_app_id" placeholder="cli_ 开头，在「凭证与基础信息」页面复制" required />
 
       <label class="required">飞书 App Secret</label>
-      <input name="lark_app_secret" type="password" placeholder="应用凭证密钥" required />
+      <input name="lark_app_secret" type="password" placeholder="在「凭证与基础信息」页面复制" required />
 
       <label>飞书群聊 ID（可选）</label>
-      <input name="lark_chat_id" placeholder="oc_xxxxxxxxxxxxxxxx" />
-      <p class="hint">默认转发到的飞书群，可在群设置中查看</p>
+      <input name="lark_chat_id" placeholder="oc_ 开头，微信消息将转发到此群" />
+      <p class="hint">不填则需要后续在 /settings 页面设置</p>
 
       <div class="security-notice">
         <p>🔒 安全说明</p>
         <ul>
           <li>您的凭证将使用 AES-256-GCM 加密后存储在 App 服务器本地，不会明文保存</li>
-          <li>凭证仅用于调用对应的第三方服务，不会用于任何其他用途</li>
-          <li>OpeniLink Hub 平台不会接触或存储您的第三方凭证</li>
-          <li>如需更高安全性，建议<a href="https://github.com/openilink/openilink-app-lark">自行部署</a>本 App</li>
+          <li>凭证仅用于调用飞书 API，不会用于任何其他用途</li>
+          <li>OpeniLink Hub 平台不会接触或存储您的飞书凭证</li>
+          <li>如需更高安全性，建议<a href="https://github.com/openilink/openilink-app-lark" target="_blank">自行部署</a>本 App</li>
         </ul>
       </div>
       <button type="submit">确认并安装</button>
