@@ -1,18 +1,18 @@
 services:
-  app:
+  lark-app:
     build: .
-    ports:
-      - "8081:8081"
+    container_name: openilink-app-lark
+    restart: unless-stopped
     environment:
+      PORT: "${PORT:-8081}"
       HUB_URL: "${HUB_URL}"
       BASE_URL: "${BASE_URL}"
-      LARK_APP_ID: "${LARK_APP_ID}"
-      LARK_APP_SECRET: "${LARK_APP_SECRET}"
+      DB_PATH: "/data/lark.db"
+      LARK_APP_ID: "${LARK_APP_ID:-}"
+      LARK_APP_SECRET: "${LARK_APP_SECRET:-}"
       LARK_CHAT_ID: "${LARK_CHAT_ID:-}"
-      DB_PATH: /data/lark.db
     volumes:
-      - app-data:/data
-    restart: unless-stopped
+      - lark-data:/data
 
 volumes:
-  app-data:
+  lark-data:
