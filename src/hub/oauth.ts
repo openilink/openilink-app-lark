@@ -5,6 +5,7 @@ import type { Config } from "../config.js";
 import type { Store } from "../store.js";
 import type { OAuthExchangeResult, ToolDefinition } from "./types.js";
 import { HubClient } from "./client.js";
+import { readBody } from "./webhook.js";
 
 /** PKCE 缓存条目 */
 interface PKCEEntry {
@@ -75,6 +76,70 @@ export function handleOAuthSetup(
   const authUrl = `${hub}/api/apps/${appId}/oauth/authorize?bot_id=${encodeURIComponent(botId)}&state=${encodeURIComponent(localState)}&code_challenge=${encodeURIComponent(challenge)}&hub_state=${encodeURIComponent(state)}`;
   res.writeHead(302, { Location: authUrl });
   res.end();
+}
+
+/**
+ * 处理 Hub 模式 2 直接安装通知（POST /oauth/redirect）
+ * Hub 直接创建安装后 POST 凭证过来，App 保存凭证并返回 webhook_url
+ */
+export async function handleOAuthNotify(
+  req: IncomingMessage,
+  res: ServerResponse,
+  config: Config,
+  store: Store,
+  toolDefinitions?: ToolDefinition[],
+): Promise<void> {
+  try {
+    const body = await readBody(req);
+    const payload = JSON.parse(body.toString()) as {
+      installation_id?: string;
+      app_token?: string;
+      webhook_secret?: string;
+      bot_id?: string;
+      handle?: string;
+      hub_url?: string;
+    };
+
+    const { installation_id, app_token, webhook_secret, bot_id, hub_url } = payload;
+
+    // 校验必填字段
+    if (!installation_id || !app_token || !webhook_secret) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "缺少必填字段: installation_id, app_token, webhook_secret" }));
+      return;
+    }
+
+    // 保存安装信息
+    store.saveInstallation({
+      id: installation_id,
+      hubUrl: hub_url || config.hubUrl,
+      appId: "",
+      botId: bot_id || "",
+      appToken: app_token,
+      webhookSecret: webhook_secret,
+      createdAt: new Date().toISOString(),
+    });
+
+    // 异步同步 tools 到 Hub
+    if (toolDefinitions && toolDefinitions.length > 0) {
+      const hubClient = new HubClient(hub_url || config.hubUrl, app_token);
+      hubClient.syncTools(toolDefinitions).catch((err) => {
+        console.error("[notify] 工具定义同步失败:", err);
+      });
+    }
+
+    console.log(`[notify] 模式 2 安装成功: installation_id=${installation_id}`);
+
+    // 返回 webhook_url
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ webhook_url: `${config.baseUrl}/hub/webhook` }));
+  } catch (err) {
+    console.error("[notify] 处理安装通知异常:", err);
+    if (!res.headersSent) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "处理安装通知失败" }));
+    }
+  }
 }
 
 /**

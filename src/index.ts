@@ -11,7 +11,7 @@ import { LarkToWx } from "./bridge/lark-to-wx.js";
 import { HubClient } from "./hub/client.js";
 import { Router } from "./router.js";
 import { handleWebhook } from "./hub/webhook.js";
-import { handleOAuthSetup, handleOAuthRedirect } from "./hub/oauth.js";
+import { handleOAuthSetup, handleOAuthRedirect, handleOAuthNotify } from "./hub/oauth.js";
 import { getManifest } from "./hub/manifest.js";
 import { collectAllTools } from "./tools/index.js";
 
@@ -99,10 +99,17 @@ async function main(): Promise<void> {
         return;
       }
 
-      // GET /oauth/redirect - OAuth 回调（完成后自动同步工具定义到 Hub）
-      if (method === "GET" && pathname === "/oauth/redirect") {
-        await handleOAuthRedirect(req, res, config, store, definitions);
-        return;
+      // GET /oauth/redirect - OAuth 回调（模式 1，完成后自动同步工具定义到 Hub）
+      // POST /oauth/redirect - Hub 直接安装通知（模式 2）
+      if (pathname === "/oauth/redirect") {
+        if (method === "POST") {
+          await handleOAuthNotify(req, res, config, store, definitions);
+          return;
+        }
+        if (method === "GET") {
+          await handleOAuthRedirect(req, res, config, store, definitions);
+          return;
+        }
       }
 
       // GET /manifest.json - App Manifest
