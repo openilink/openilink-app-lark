@@ -30,9 +30,14 @@ export class LarkToWx {
     }
 
     // 通过 parentId 或 rootId 查找消息映射，确定目标微信用户
-    const link =
-      (data.parentId ? this.store.getMessageLinkByLarkId(data.parentId) : undefined) ??
-      (data.rootId ? this.store.getMessageLinkByLarkId(data.rootId) : undefined);
+    // 遍历所有安装实例，在对应的 installation_id 下查找消息映射
+    let link: import("../hub/types.js").MessageLink | undefined;
+    for (const inst of installations) {
+      link =
+        (data.parentId ? this.store.getMessageLinkByLarkId(data.parentId, inst.id) : undefined) ??
+        (data.rootId ? this.store.getMessageLinkByLarkId(data.rootId, inst.id) : undefined);
+      if (link) break;
+    }
 
     if (!link) {
       console.log(

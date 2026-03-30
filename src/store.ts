@@ -101,10 +101,11 @@ export class Store {
       .run(link.installationId, link.larkMessageId, link.wxUserId, link.wxUserName);
   }
 
-  getMessageLinkByLarkId(larkMessageId: string): MessageLink | undefined {
+  /** 根据飞书消息 ID 和安装实例 ID 查找消息映射 */
+  getMessageLinkByLarkId(larkMessageId: string, installationId: string): MessageLink | undefined {
     const row = this.db
-      .prepare("SELECT * FROM message_links WHERE lark_message_id = ?")
-      .get(larkMessageId) as any;
+      .prepare("SELECT * FROM message_links WHERE lark_message_id = ? AND installation_id = ?")
+      .get(larkMessageId, installationId) as any;
     if (!row) return undefined;
     return {
       id: row.id,
@@ -116,13 +117,13 @@ export class Store {
     };
   }
 
-  /** 查找某微信用户最近的一条消息映射 */
-  getLatestLinkByWxUser(wxUserId: string): MessageLink | undefined {
+  /** 查找某微信用户在指定安装实例下最近的一条消息映射 */
+  getLatestLinkByWxUser(wxUserId: string, installationId: string): MessageLink | undefined {
     const row = this.db
       .prepare(
-        "SELECT * FROM message_links WHERE wx_user_id = ? ORDER BY id DESC LIMIT 1",
+        "SELECT * FROM message_links WHERE wx_user_id = ? AND installation_id = ? ORDER BY id DESC LIMIT 1",
       )
-      .get(wxUserId) as any;
+      .get(wxUserId, installationId) as any;
     if (!row) return undefined;
     return {
       id: row.id,
