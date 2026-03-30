@@ -99,4 +99,19 @@ export class HubClient {
   ): Promise<void> {
     await this.sendMessage(to, "file", "", { url: fileUrl, filename: fileName, traceId });
   }
+
+  /**
+   * 从 Hub 拉取用户配置
+   * GET {hubUrl}/bot/v1/config
+   */
+  async fetchConfig(): Promise<Record<string, string>> {
+    const url = `${this.hubUrl}/bot/v1/config`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${this.appToken}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return {};
+    const data = (await res.json()) as { config?: Record<string, string> };
+    return data.config || {};
+  }
 }

@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Installation, MessageLink } from "./hub/types.js";
+import { encryptConfig, decryptConfig } from "./utils/config-crypto.js";
 
 /**
  * SQLite 存储层 - 管理安装凭证和消息映射
@@ -46,6 +47,13 @@ export class Store {
       CREATE INDEX IF NOT EXISTS idx_ml_wx_user
         ON message_links(wx_user_id);
     `);
+
+    // 兼容旧库：为 installations 表添加 encrypted_config 列
+    try {
+      this.db.exec(`ALTER TABLE installations ADD COLUMN encrypted_config TEXT NOT NULL DEFAULT ''`);
+    } catch {
+      // 列已存在则忽略
+    }
   }
 
   // ─── 安装管理 ───
@@ -87,6 +95,29 @@ export class Store {
       webhookSecret: row.webhook_secret,
       createdAt: row.created_at,
     }));
+  }
+
+  // ─── 用户配置（加密存储） ───
+
+  /** 保存用户配置（AES-256-GCM 加密后存储） */
+  saveConfig(installationId: string, config: Record<string, string>): void {
+    const encrypted = encryptConfig(JSON.stringify(config));
+    this.db
+      .prepare(`UPDATE installations SET encrypted_config = ? WHERE id = ?`)
+      .run(encrypted, installationId);
+  }
+
+  /** 读取用户配置（从本地解密） */
+  getConfig(installationId: string): Record<string, string> {
+    const row = this.db
+      .prepare("SELECT encrypted_config FROM installations WHERE id = ?")
+      .get(installationId) as { encrypted_config?: string } | undefined;
+    if (!row?.encrypted_config) return {};
+    try {
+      return JSON.parse(decryptConfig(row.encrypted_config)) as Record<string, string>;
+    } catch {
+      return {};
+    }
   }
 
   // ─── 消息映射 ───

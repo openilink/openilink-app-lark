@@ -36,7 +36,7 @@ export function getManifest(
     description: "微信 ↔ 飞书双向桥接 + 飞书全平台操作",
     icon: "🔗",
     events: ["message", "command"],
-    scopes: ["message:read", "message:write", "tools:write"],
+    scopes: ["message:read", "message:write", "tools:write", "config:read"],
     tools: toolDefinitions,
     oauth_setup_url: `${baseUrl}/oauth/setup`,
     oauth_redirect_url: `${baseUrl}/oauth/redirect`,

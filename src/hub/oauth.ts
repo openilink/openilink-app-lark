@@ -121,12 +121,20 @@ export async function handleOAuthNotify(
     });
 
     // 异步同步 tools 到 Hub
+    const hubClient = new HubClient(hub_url || config.hubUrl, app_token);
     if (toolDefinitions && toolDefinitions.length > 0) {
-      const hubClient = new HubClient(hub_url || config.hubUrl, app_token);
       hubClient.syncTools(toolDefinitions).catch((err) => {
         console.error("[notify] 工具定义同步失败:", err);
       });
     }
+
+    // 异步拉取用户配置并加密存储到本地
+    hubClient.fetchConfig().then((cfg) => {
+      if (Object.keys(cfg).length > 0) {
+        store.saveConfig(installation_id, cfg);
+        console.log("[notify] 用户配置已拉取并加密存储");
+      }
+    }).catch((e) => console.error("[notify] 拉取用户配置失败:", e));
 
     console.log(`[notify] 模式 2 安装成功: installation_id=${installation_id}`);
 
@@ -216,15 +224,23 @@ export async function handleOAuthRedirect(
     console.log("[oauth] 安装成功, installation_id:", result.installation_id);
 
     // OAuth 成功后，同步工具定义到 Hub
+    const hubClient = new HubClient(hub, result.app_token);
     if (toolDefinitions && toolDefinitions.length > 0) {
       try {
-        const hubClient = new HubClient(hub, result.app_token);
         await hubClient.syncTools(toolDefinitions);
         console.log("[oauth] 工具定义同步完成");
       } catch (err) {
         console.error("[oauth] 工具定义同步失败:", err);
       }
     }
+
+    // 安装成功后异步拉取用户配置并加密存储到本地
+    hubClient.fetchConfig().then((cfg) => {
+      if (Object.keys(cfg).length > 0) {
+        store.saveConfig(result.installation_id, cfg);
+        console.log("[oauth] 用户配置已拉取并加密存储");
+      }
+    }).catch((e) => console.error("[oauth] 拉取用户配置失败:", e));
 
     // 重定向到 returnUrl（如果有）
     if (returnUrl) {

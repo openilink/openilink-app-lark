@@ -15,6 +15,28 @@ import { handleOAuthSetup, handleOAuthRedirect, handleOAuthNotify } from "./hub/
 import { getManifest } from "./hub/manifest.js";
 import { collectAllTools } from "./tools/index.js";
 
+/** 按 installation_id 缓存的 per-installation 飞书客户端 */
+const larkClientCache = new Map<string, LarkClient>();
+
+/** 获取或创建 per-installation 的飞书客户端 */
+function getOrCreateLarkClient(
+  installationId: string,
+  appId: string,
+  appSecret: string,
+  chatId: string,
+  defaultClient: LarkClient,
+): LarkClient {
+  // 如果凭证与默认客户端相同，直接复用
+  if (!installationId) return defaultClient;
+  const cached = larkClientCache.get(installationId);
+  if (cached) return cached;
+  // 创建新客户端并缓存
+  const client = new LarkClient(appId, appSecret, chatId);
+  larkClientCache.set(installationId, client);
+  console.log(`[main] 为安装 ${installationId} 创建了独立的飞书客户端`);
+  return client;
+}
+
 /** 解析请求 URL 的路径和方法 */
 function parseRequest(req: http.IncomingMessage): { method: string; pathname: string } {
   const method = (req.method ?? "GET").toUpperCase();
@@ -57,8 +79,23 @@ async function main(): Promise<void> {
           // 命令事件 - 路由到 tool handler，支持同步/异步响应
           onCommand: async (event, installation) => {
             if (!event.event) return null;
+            // 读取本地加密存储的用户配置，优先于环境变量
+            const userCfg = store.getConfig(installation.id);
+            const appId = userCfg.lark_app_id || config.larkAppId;
+            const appSecret = userCfg.lark_app_secret || config.larkAppSecret;
+            const chatId = userCfg.lark_chat_id || config.larkChatId;
+
+            // 如果用户有自定义凭证，使用 per-installation 缓存客户端
+            const instLarkClient = getOrCreateLarkClient(
+              installation.id, appId, appSecret, chatId, larkClient,
+            );
+
+            // 用当前安装对应的飞书 SDK 重新收集 tools handlers
+            const { handlers: instHandlers } = collectAllTools(instLarkClient.sdk);
+            const instRouter = new Router(instHandlers);
+
             const hubClient = new HubClient(installation.hubUrl, installation.appToken);
-            return router.handleCommand(event, installation, hubClient);
+            return instRouter.handleCommand(event, installation, hubClient);
           },
           // 非命令事件（消息桥接等）
           onEvent: async (event, installation) => {
