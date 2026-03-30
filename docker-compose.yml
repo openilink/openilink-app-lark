@@ -11,6 +11,7 @@ services:
       LARK_APP_ID: "${LARK_APP_ID:-}"
       LARK_APP_SECRET: "${LARK_APP_SECRET:-}"
       LARK_CHAT_ID: "${LARK_CHAT_ID:-}"
+      CONFIG_ENCRYPT_KEY: "${CONFIG_ENCRYPT_KEY}"
     volumes:
       - lark-data:/data
 
