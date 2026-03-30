@@ -41,28 +41,9 @@ export function getManifest(
     oauth_setup_url: `${baseUrl}/oauth/setup`,
     oauth_redirect_url: `${baseUrl}/oauth/redirect`,
     webhook_url: `${baseUrl}/hub/webhook`,
-    config_schema: {
-      type: "object",
-      properties: {
-        lark_app_id: {
-          type: "string",
-          title: "飞书 App ID",
-          description: "在飞书开发者后台创建应用后获取",
-        },
-        lark_app_secret: {
-          type: "string",
-          title: "飞书 App Secret",
-          description: "应用凭证密钥",
-        },
-        lark_chat_id: {
-          type: "string",
-          title: "飞书群聊 ID",
-          description: "默认转发到的飞书群 chat_id（可选）",
-        },
-      },
-      required: ["lark_app_id", "lark_app_secret"],
-    },
     guide: `## 飞书 Bridge 安装指南
+
+安装时会引导您配置飞书 Key，请提前准备好以下信息：
 
 ### 第 1 步：创建飞书应用
 1. 访问 [飞书开发者后台](https://open.feishu.cn/app)
@@ -78,10 +59,12 @@ export function getManifest(
 ### 第 3 步：启用事件订阅
 在「事件与回调」中选择 **长连接** 模式。
 
-### 第 4 步：获取群聊 ID
+### 第 4 步：获取群聊 ID（可选）
 在飞书群设置中找到群聊链接，提取 \`oc_\` 开头的 ID。
 
-### 第 5 步：填写上方配置并安装
+### 第 5 步：点击安装
+安装过程中会显示配置页面，填写飞书 App ID、App Secret 即可完成。
+安装后可通过 /settings 页面随时修改配置。
 `,
   };
 }

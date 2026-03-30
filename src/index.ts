@@ -12,6 +12,7 @@ import { HubClient } from "./hub/client.js";
 import { Router } from "./router.js";
 import { handleWebhook } from "./hub/webhook.js";
 import { handleOAuthSetup, handleOAuthRedirect, handleOAuthNotify } from "./hub/oauth.js";
+import { handleSettingsPage, handleSettingsVerify, handleSettingsSave } from "./hub/settings.js";
 import { getManifest } from "./hub/manifest.js";
 import { collectAllTools } from "./tools/index.js";
 
@@ -24,17 +25,22 @@ function getOrCreateLarkClient(
   appId: string,
   appSecret: string,
   chatId: string,
-  defaultClient: LarkClient,
+  defaultClient: LarkClient | null,
 ): LarkClient {
-  // 如果凭证与默认客户端相同，直接复用
-  if (!installationId) return defaultClient;
+  // 如果没有 installationId 且有默认客户端，直接复用
+  if (!installationId && defaultClient) return defaultClient;
   const cached = larkClientCache.get(installationId);
   if (cached) return cached;
-  // 创建新客户端并缓存
-  const client = new LarkClient(appId, appSecret, chatId);
-  larkClientCache.set(installationId, client);
-  console.log(`[main] 为安装 ${installationId} 创建了独立的飞书客户端`);
-  return client;
+  // 如果有凭证则创建新客户端并缓存
+  if (appId && appSecret) {
+    const client = new LarkClient(appId, appSecret, chatId);
+    larkClientCache.set(installationId, client);
+    console.log(`[main] 为安装 ${installationId} 创建了独立的飞书客户端`);
+    return client;
+  }
+  // 兜底：使用默认客户端（可能为 null 时抛异常，调用方需确保凭证有效）
+  if (defaultClient) return defaultClient;
+  throw new Error(`[main] 安装 ${installationId} 缺少飞书凭证且无默认客户端`);
 }
 
 /** 解析请求 URL 的路径和方法 */
@@ -53,20 +59,28 @@ async function main(): Promise<void> {
   const store = new Store(config.dbPath);
   console.log("[main] 数据库初始化完成");
 
-  // 3. 初始化飞书客户端
-  const larkClient = new LarkClient(config.larkAppId, config.larkAppSecret, config.larkChatId);
-  console.log("[main] 飞书客户端初始化完成");
+  // 3. 初始化飞书客户端（如果环境变量中配置了飞书凭证）
+  const hasLarkCredentials = !!(config.larkAppId && config.larkAppSecret);
+  const larkClient = hasLarkCredentials
+    ? new LarkClient(config.larkAppId, config.larkAppSecret, config.larkChatId)
+    : null;
+  if (larkClient) {
+    console.log("[main] 飞书客户端初始化完成");
+  } else {
+    console.log("[main] 未配置飞书凭证，跳过默认飞书客户端初始化（云端托管模式，用户安装时填写）");
+  }
 
-  // 4. 收集所有 tools
-  const { definitions, handlers } = collectAllTools(larkClient.sdk);
+  // 4. 收集所有 tools（需要一个 SDK 实例来获取定义，如果没有默认客户端则用空凭证的客户端仅收集定义）
+  const toolsSdkClient = larkClient ?? new LarkClient("", "", "");
+  const { definitions, handlers } = collectAllTools(toolsSdkClient.sdk);
   console.log(`[main] 已注册 ${definitions.length} 个工具`);
 
   // 5. 初始化路由器
   const router = new Router(handlers);
 
-  // 6. 初始化桥接模块
-  const wxToLark = new WxToLark(larkClient, store, config.larkChatId);
-  const larkToWx = new LarkToWx(store, config.larkChatId);
+  // 6. 初始化桥接模块（如果有默认飞书客户端才启用）
+  const wxToLark = larkClient ? new WxToLark(larkClient, store, config.larkChatId) : null;
+  const larkToWx = larkClient ? new LarkToWx(store, config.larkChatId) : null;
 
   // 7. 创建 HTTP 服务器
   const server = http.createServer(async (req, res) => {
@@ -100,7 +114,7 @@ async function main(): Promise<void> {
           // 非命令事件（消息桥接等）
           onEvent: async (event, installation) => {
             if (!event.event) return;
-            if (event.event.type.startsWith("message.")) {
+            if (event.event.type.startsWith("message.") && wxToLark) {
               await wxToLark.handleWxEvent(event, installation);
             }
           },
@@ -130,9 +144,9 @@ async function main(): Promise<void> {
         return;
       }
 
-      // GET /oauth/setup - OAuth 安装流程
-      if (method === "GET" && pathname === "/oauth/setup") {
-        handleOAuthSetup(req, res, config);
+      // GET/POST /oauth/setup - OAuth 安装流程（显示配置表单 / 提交后跳转授权）
+      if (pathname === "/oauth/setup" && (method === "GET" || method === "POST")) {
+        await handleOAuthSetup(req, res, config);
         return;
       }
 
@@ -157,6 +171,24 @@ async function main(): Promise<void> {
         return;
       }
 
+      // GET /settings — 设置页面（输入 token 验证身份）
+      if (method === "GET" && pathname === "/settings") {
+        handleSettingsPage(req, res);
+        return;
+      }
+
+      // POST /settings/verify — 验证 token 后显示配置表单
+      if (method === "POST" && pathname === "/settings/verify") {
+        await handleSettingsVerify(req, res, config, store);
+        return;
+      }
+
+      // POST /settings/save — 保存修改后的配置
+      if (method === "POST" && pathname === "/settings/save") {
+        await handleSettingsSave(req, res, config, store);
+        return;
+      }
+
       // GET /health - 健康检查
       if (method === "GET" && pathname === "/health") {
         res.writeHead(200, { "Content-Type": "application/json" });
@@ -176,15 +208,21 @@ async function main(): Promise<void> {
     }
   });
 
-  // 8. 启动飞书 WebSocket 事件订阅（后台）
-  const wsClient = startLarkEventSubscription(config.larkAppId, config.larkAppSecret, (data) => {
-    console.log(`[main] 飞书消息: type=${data.messageType}, chat=${data.chatId}`);
-    // 飞书 → 微信 反向桥接
-    const installations = store.getAllInstallations();
-    larkToWx.handleLarkMessage(data, installations).catch((err) => {
-      console.error("[main] LarkToWx 处理消息失败:", err);
+  // 8. 启动飞书 WebSocket 事件订阅（仅在配置了飞书凭证时启动）
+  let wsClient: ReturnType<typeof startLarkEventSubscription> | null = null;
+  if (hasLarkCredentials && larkToWx) {
+    const _larkToWx = larkToWx;
+    wsClient = startLarkEventSubscription(config.larkAppId, config.larkAppSecret, (data) => {
+      console.log(`[main] 飞书消息: type=${data.messageType}, chat=${data.chatId}`);
+      // 飞书 → 微信 反向桥接
+      const installations = store.getAllInstallations();
+      _larkToWx.handleLarkMessage(data, installations).catch((err) => {
+        console.error("[main] LarkToWx 处理消息失败:", err);
+      });
     });
-  });
+  } else {
+    console.log("[main] 未配置飞书凭证，跳过 WebSocket 事件订阅");
+  }
 
   // 9. 启动 HTTP 服务器
   const port = parseInt(config.port, 10);
@@ -197,8 +235,10 @@ async function main(): Promise<void> {
   // 10. 优雅关闭
   const shutdown = (signal: string) => {
     console.log(`\n[main] 收到 ${signal} 信号，开始优雅关闭...`);
-    wsClient.close();
-    console.log("[main] 飞书 WebSocket 连接已关闭");
+    if (wsClient) {
+      wsClient.close();
+      console.log("[main] 飞书 WebSocket 连接已关闭");
+    }
     server.close(() => {
       console.log("[main] HTTP 服务器已关闭");
       store.close();
