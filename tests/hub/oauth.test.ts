@@ -124,15 +124,18 @@ describe("handleOAuthSetup", () => {
 
     // 应返回 302 重定向
     expect(res._statusCode).toBe(302);
-    // Location 应指向 Hub 的授权地址
+    // Location 应指向 Hub 的授权地址（按 query 参数精确断言，避免 hub_state 误满足 state）
     const location = res._headers["Location"] ?? res._headers["location"] ?? "";
-    expect(location).toContain("http://hub.test/api/apps/app-123/oauth/authorize");
-    expect(location).toContain("bot_id=bot-456");
+    const auth = new URL(location);
+    expect(auth.origin + auth.pathname).toBe("http://hub.test/api/apps/app-123/oauth/authorize");
+    expect(auth.searchParams.get("bot_id")).toBe("bot-456");
     // hub_state 透传原始 state
-    expect(location).toContain("hub_state=test-state-001");
-    // 应包含 code_challenge 和生成的本地 state
-    expect(location).toContain("code_challenge=");
-    expect(location).toContain("state=");
+    expect(auth.searchParams.get("hub_state")).toBe("test-state-001");
+    expect(auth.searchParams.get("code_challenge")).toBeTruthy();
+    // 本地 PKCE state 是新生成的 16 字节 hex，且不等于透传的 hub_state
+    const localState = auth.searchParams.get("state");
+    expect(localState).toMatch(/^[a-f0-9]{32}$/);
+    expect(localState).not.toBe("test-state-001");
   });
 
   it("POST 缺少 app_id 参数时应返回 400", async () => {
