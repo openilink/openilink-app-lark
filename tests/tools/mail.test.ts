@@ -30,7 +30,8 @@ function createMockLarkSdkClient() {
             ],
           },
         }),
-        create: vi.fn().mockResolvedValue({
+        // 源码通过 userMailboxMessage.send 发送邮件（而非 create）
+        send: vi.fn().mockResolvedValue({
           code: 0,
           data: {},
         }),
@@ -162,8 +163,8 @@ describe("mailTools", () => {
           }),
         );
 
-        expect(client.mail.userMailboxMessage.create).toHaveBeenCalledOnce();
-        const callArgs = client.mail.userMailboxMessage.create.mock.calls[0][0];
+        expect(client.mail.userMailboxMessage.send).toHaveBeenCalledOnce();
+        const callArgs = client.mail.userMailboxMessage.send.mock.calls[0][0];
         expect(callArgs.data.subject).toBe("测试邮件");
         expect(callArgs.data.to[0].email_address).toBe("recipient@test.com");
         expect(callArgs.data.body.content).toBe("这是邮件正文");
@@ -174,7 +175,7 @@ describe("mailTools", () => {
       });
 
       it("SDK 返回非 0 code 时应返回错误信息", async () => {
-        client.mail.userMailboxMessage.create.mockResolvedValueOnce({
+        client.mail.userMailboxMessage.send.mockResolvedValueOnce({
           code: 40003,
           msg: "权限不足",
         });
@@ -192,7 +193,7 @@ describe("mailTools", () => {
       });
 
       it("SDK 抛出异常时应返回错误信息", async () => {
-        client.mail.userMailboxMessage.create.mockRejectedValueOnce(
+        client.mail.userMailboxMessage.send.mockRejectedValueOnce(
           new Error("发送配额已满"),
         );
 
@@ -211,40 +212,22 @@ describe("mailTools", () => {
     });
 
     describe("search_mail", () => {
-      it("应调用 SDK 搜索邮件并返回格式化结果", async () => {
+      // 邮件搜索需要使用专用搜索 API，当前 SDK 未直接暴露该接口，
+      // 因此 handler 直接返回引导用户使用飞书客户端搜索的提示，不调用任何 SDK 方法。
+      it("应返回暂不支持搜索的提示，并包含搜索关键词", async () => {
         const handler = handlers.get("search_mail")!;
         const result = await handler(makeCtx({ query: "周会" }));
 
-        expect(client.mail.userMailboxMessage.list).toHaveBeenCalled();
-        const callArgs = client.mail.userMailboxMessage.list.mock.calls[0][0];
-        expect(callArgs.params.search_key).toBe("周会");
-
-        expect(result).toContain("2");
-        expect(result).toContain("周会通知");
+        expect(result).toContain("暂不支持");
+        expect(result).toContain("周会");
       });
 
-      it("无搜索结果时应返回提示", async () => {
-        client.mail.userMailboxMessage.list.mockResolvedValueOnce({
-          code: 0,
-          data: { items: [] },
-        });
-
+      it("提示中应引导用户通过飞书客户端搜索", async () => {
         const handler = handlers.get("search_mail")!;
-        const result = await handler(makeCtx({ query: "不存在的邮件" }));
+        const result = await handler(makeCtx({ query: "项目更新" }));
 
-        expect(result).toContain("未找到");
-      });
-
-      it("SDK 抛出异常时应返回错误信息", async () => {
-        client.mail.userMailboxMessage.list.mockRejectedValueOnce(
-          new Error("搜索超时"),
-        );
-
-        const handler = handlers.get("search_mail")!;
-        const result = await handler(makeCtx({ query: "测试" }));
-
-        expect(result).toContain("搜索邮件失败");
-        expect(result).toContain("搜索超时");
+        expect(result).toContain("飞书客户端");
+        expect(result).toContain("项目更新");
       });
     });
   });

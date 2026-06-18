@@ -125,7 +125,7 @@ describe("Store", () => {
         wxUserName: "张三",
       });
 
-      const link = store.getMessageLinkByLarkId("lark-msg-001");
+      const link = store.getMessageLinkByLarkId("lark-msg-001", "inst-001");
       expect(link).toBeDefined();
       expect(link!.installationId).toBe("inst-001");
       expect(link!.larkMessageId).toBe("lark-msg-001");
@@ -135,7 +135,7 @@ describe("Store", () => {
     });
 
     it("不存在的飞书消息 ID 应返回 undefined", () => {
-      const link = store.getMessageLinkByLarkId("non-existent");
+      const link = store.getMessageLinkByLarkId("non-existent", "inst-001");
       expect(link).toBeUndefined();
     });
   });
@@ -155,14 +155,14 @@ describe("Store", () => {
         wxUserName: "张三",
       });
 
-      const link = store.getLatestLinkByWxUser("wx-user-001");
+      const link = store.getLatestLinkByWxUser("wx-user-001", "inst-001");
       expect(link).toBeDefined();
       // 最新的一条应该是 lark-msg-002（ID 更大）
       expect(link!.larkMessageId).toBe("lark-msg-002");
     });
 
     it("不存在的微信用户应返回 undefined", () => {
-      const link = store.getLatestLinkByWxUser("non-existent");
+      const link = store.getLatestLinkByWxUser("non-existent", "inst-001");
       expect(link).toBeUndefined();
     });
   });

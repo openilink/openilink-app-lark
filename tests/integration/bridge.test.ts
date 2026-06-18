@@ -97,14 +97,18 @@ describe("飞书 Bridge 集成测试", () => {
       const url = new URL(req.url!, `http://localhost:${APP_PORT}`);
 
       if (req.method === "POST" && url.pathname === "/hub/webhook") {
-        await handleWebhook(req, res, store, async (event, installation) => {
-          if (!event.event) return;
-          const eventType = event.event.type;
+        await handleWebhook(req, res, store, {
+          onCommand: async () => null,
+          onEvent: async (event, installation) => {
+            if (!event.event) return;
+            const eventType = event.event.type;
 
-          if (eventType.startsWith("message.")) {
-            // 微信→飞书桥接
-            await wxToLark.handleWxEvent(event, installation);
-          }
+            if (eventType.startsWith("message.")) {
+              // 微信→飞书桥接
+              await wxToLark.handleWxEvent(event, installation);
+            }
+          },
+          onAsyncPush: async () => {},
         });
         return;
       }
@@ -201,7 +205,7 @@ describe("飞书 Bridge 集成测试", () => {
     await waitFor(async () => larkSentMessages.length > 0, 5000);
 
     // 验证 Store 中保存了消息映射
-    const link = store.getLatestLinkByWxUser("user_charlie");
+    const link = store.getLatestLinkByWxUser("user_charlie", MOCK_INSTALLATION_ID);
     expect(link).toBeDefined();
     expect(link!.wxUserId).toBe("user_charlie");
     expect(link!.wxUserName).toBe("user_charlie");
@@ -219,7 +223,7 @@ describe("飞书 Bridge 集成测试", () => {
     await waitFor(async () => larkSentMessages.length > 0, 5000);
 
     // 获取映射中的飞书消息 ID
-    const link = store.getLatestLinkByWxUser("user_dave");
+    const link = store.getLatestLinkByWxUser("user_dave", MOCK_INSTALLATION_ID);
     expect(link).toBeDefined();
     const larkMsgId = link!.larkMessageId;
 
@@ -276,7 +280,7 @@ describe("飞书 Bridge 集成测试", () => {
     // 先建立映射
     await injectMessage("user_eve", "建立映射");
     await waitFor(async () => larkSentMessages.length > 0, 5000);
-    const link = store.getLatestLinkByWxUser("user_eve");
+    const link = store.getLatestLinkByWxUser("user_eve", MOCK_INSTALLATION_ID);
 
     // 模拟来自其他群的消息
     const larkData: LarkMessageData = {
@@ -391,7 +395,7 @@ describe("飞书 Bridge 集成测试", () => {
     expect(larkSentMessages[0].text).toContain("你好，请帮我查个信息");
 
     // 步骤 2: 飞书用户回复 → App → Hub → 微信
-    const link = store.getLatestLinkByWxUser("user_frank");
+    const link = store.getLatestLinkByWxUser("user_frank", MOCK_INSTALLATION_ID);
     expect(link).toBeDefined();
 
     const replyData: LarkMessageData = {

@@ -63,16 +63,18 @@ describe("generatePKCE", () => {
     expect(typeof result.challenge).toBe("string");
   });
 
-  it("verifier 应为 64 字符的十六进制字符串（32 字节）", () => {
+  it("verifier 应为 base64url 字符串（32 字节，RFC 7636）", () => {
     const { verifier } = generatePKCE();
-    expect(verifier).toHaveLength(64);
-    expect(verifier).toMatch(/^[0-9a-f]{64}$/);
+    // 32 字节 base64url 编码后为 43 个字符（无填充）
+    expect(verifier).toHaveLength(43);
+    expect(verifier).toMatch(/^[A-Za-z0-9_-]+$/);
   });
 
-  it("challenge 应为 64 字符的十六进制字符串（SHA256 哈希）", () => {
+  it("challenge 应为 base64url 编码的 SHA256 哈希（RFC 7636）", () => {
     const { challenge } = generatePKCE();
-    expect(challenge).toHaveLength(64);
-    expect(challenge).toMatch(/^[0-9a-f]{64}$/);
+    // SHA-256（32 字节）base64url 编码后为 43 个字符（无填充）
+    expect(challenge).toHaveLength(43);
+    expect(challenge).toMatch(/^[A-Za-z0-9_-]+$/);
   });
 
   it("每次调用应生成不同的 verifier", () => {
@@ -87,10 +89,10 @@ describe("generatePKCE", () => {
     expect(a.challenge).not.toBe(b.challenge);
   });
 
-  it("challenge 应为 verifier 的 SHA256 哈希", async () => {
+  it("challenge 应为 verifier 的 SHA256 哈希（base64url 编码）", async () => {
     const { createHash } = await import("node:crypto");
     const { verifier, challenge } = generatePKCE();
-    const expected = createHash("sha256").update(verifier).digest("hex");
+    const expected = createHash("sha256").update(verifier).digest("base64url");
     expect(challenge).toBe(expected);
   });
 });

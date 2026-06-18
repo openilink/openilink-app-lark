@@ -1,39 +1,29 @@
 /**
  * tools/sheets.ts 测试
- * Mock lark.Client 验证电子表格工具的 handler 和定义
+ * 源码不再使用 SDK 的 spreadsheetSheetValue API，而是通过
+ * client.tokenManager 获取 tenant_access_token 后直接 fetch 飞书 HTTP API。
+ * 因此这里 mock tokenManager 和全局 fetch。
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { sheetsTools } from "../../src/tools/sheets.js";
 import type { ToolContext } from "../../src/hub/types.js";
 
-/** 创建模拟的飞书 SDK Client */
+/** 创建模拟的飞书 SDK Client（仅含 tokenManager） */
 function createMockLarkSdkClient() {
   return {
-    sheets: {
-      spreadsheetSheetValue: {
-        get: vi.fn().mockResolvedValue({
-          code: 0,
-          data: {
-            valueRange: {
-              values: [
-                ["姓名", "年龄", "部门"],
-                ["张三", 28, "研发"],
-                ["李四", 32, "产品"],
-              ],
-            },
-          },
-        }),
-        update: vi.fn().mockResolvedValue({
-          code: 0,
-          data: {},
-        }),
-        append: vi.fn().mockResolvedValue({
-          code: 0,
-          data: {},
-        }),
-      },
+    tokenManager: {
+      getTenantAccessToken: vi.fn().mockResolvedValue("t-access-token"),
     },
   } as any;
+}
+
+/** 设置全局 fetch mock，返回指定 JSON 响应 */
+function mockFetchJson(json: any) {
+  const fetchMock = vi.fn().mockResolvedValue({
+    json: async () => json,
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
 }
 
 /** 创建测试用 ToolContext */
@@ -48,6 +38,10 @@ function makeCtx(args: Record<string, any>): ToolContext {
 }
 
 describe("sheetsTools", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   describe("tool definitions 结构", () => {
     it("应包含所有电子表格相关工具定义", () => {
       const names = sheetsTools.definitions.map((d) => d.name);
@@ -102,16 +96,32 @@ describe("sheetsTools", () => {
     });
 
     describe("read_sheet", () => {
-      it("应调用 SDK 读取表格数据并返回格式化结果", async () => {
+      it("应调用飞书 HTTP API 读取表格数据并返回格式化结果", async () => {
+        const fetchMock = mockFetchJson({
+          code: 0,
+          data: {
+            valueRange: {
+              values: [
+                ["姓名", "年龄", "部门"],
+                ["张三", 28, "研发"],
+                ["李四", 32, "产品"],
+              ],
+            },
+          },
+        });
+
         const handler = handlers.get("read_sheet")!;
         const result = await handler(
           makeCtx({ spreadsheet_token: "sheet_001", range: "Sheet1!A1:C3" }),
         );
 
-        expect(client.sheets.spreadsheetSheetValue.get).toHaveBeenCalledOnce();
-        const callArgs = client.sheets.spreadsheetSheetValue.get.mock.calls[0][0];
-        expect(callArgs.path.spreadsheet_token).toBe("sheet_001");
-        expect(callArgs.params.range).toBe("Sheet1!A1:C3");
+        expect(client.tokenManager.getTenantAccessToken).toHaveBeenCalledOnce();
+        expect(fetchMock).toHaveBeenCalledOnce();
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(url).toContain("sheet_001");
+        expect(url).toContain(encodeURIComponent("Sheet1!A1:C3"));
+        expect(init.method).toBe("GET");
+        expect(init.headers.Authorization).toBe("Bearer t-access-token");
 
         expect(result).toContain("3"); // 3 行
         expect(result).toContain("姓名");
@@ -119,10 +129,7 @@ describe("sheetsTools", () => {
       });
 
       it("无数据时应返回提示", async () => {
-        client.sheets.spreadsheetSheetValue.get.mockResolvedValueOnce({
-          code: 0,
-          data: { valueRange: { values: [] } },
-        });
+        mockFetchJson({ code: 0, data: { valueRange: { values: [] } } });
 
         const handler = handlers.get("read_sheet")!;
         const result = await handler(
@@ -132,11 +139,8 @@ describe("sheetsTools", () => {
         expect(result).toContain("无数据");
       });
 
-      it("SDK 返回非 0 code 时应返回错误信息", async () => {
-        client.sheets.spreadsheetSheetValue.get.mockResolvedValueOnce({
-          code: 40003,
-          msg: "无权限",
-        });
+      it("API 返回非 0 code 时应返回错误信息", async () => {
+        mockFetchJson({ code: 40003, msg: "无权限" });
 
         const handler = handlers.get("read_sheet")!;
         const result = await handler(
@@ -146,10 +150,9 @@ describe("sheetsTools", () => {
         expect(result).toContain("读取表格失败");
       });
 
-      it("SDK 抛出异常时应返回错误信息", async () => {
-        client.sheets.spreadsheetSheetValue.get.mockRejectedValueOnce(
-          new Error("表格不存在"),
-        );
+      it("fetch 抛出异常时应返回错误信息", async () => {
+        const fetchMock = vi.fn().mockRejectedValue(new Error("表格不存在"));
+        vi.stubGlobal("fetch", fetchMock);
 
         const handler = handlers.get("read_sheet")!;
         const result = await handler(
@@ -162,7 +165,9 @@ describe("sheetsTools", () => {
     });
 
     describe("write_sheet", () => {
-      it("应调用 SDK 写入数据并返回成功提示", async () => {
+      it("应调用飞书 HTTP API 写入数据并返回成功提示", async () => {
+        const fetchMock = mockFetchJson({ code: 0, data: {} });
+
         const values = JSON.stringify([
           ["王五", 25, "设计"],
           ["赵六", 30, "运营"],
@@ -176,9 +181,13 @@ describe("sheetsTools", () => {
           }),
         );
 
-        expect(client.sheets.spreadsheetSheetValue.update).toHaveBeenCalledOnce();
-        const callArgs = client.sheets.spreadsheetSheetValue.update.mock.calls[0][0];
-        expect(callArgs.data.valueRange.values).toEqual([
+        expect(fetchMock).toHaveBeenCalledOnce();
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(url).toContain("sheet_001");
+        expect(init.method).toBe("PUT");
+        const body = JSON.parse(init.body);
+        expect(body.valueRange.range).toBe("Sheet1!A4:C5");
+        expect(body.valueRange.values).toEqual([
           ["王五", 25, "设计"],
           ["赵六", 30, "运营"],
         ]);
@@ -187,7 +196,9 @@ describe("sheetsTools", () => {
         expect(result).toContain("2"); // 2 行
       });
 
-      it("values 格式错误时应返回提示", async () => {
+      it("values 格式错误时应返回提示且不发起请求", async () => {
+        const fetchMock = mockFetchJson({ code: 0, data: {} });
+
         const handler = handlers.get("write_sheet")!;
         const result = await handler(
           makeCtx({
@@ -198,14 +209,11 @@ describe("sheetsTools", () => {
         );
 
         expect(result).toContain("数据格式错误");
-        expect(client.sheets.spreadsheetSheetValue.update).not.toHaveBeenCalled();
+        expect(fetchMock).not.toHaveBeenCalled();
       });
 
-      it("SDK 返回非 0 code 时应返回错误信息", async () => {
-        client.sheets.spreadsheetSheetValue.update.mockResolvedValueOnce({
-          code: 40003,
-          msg: "范围无效",
-        });
+      it("API 返回非 0 code 时应返回错误信息", async () => {
+        mockFetchJson({ code: 40003, msg: "范围无效" });
 
         const handler = handlers.get("write_sheet")!;
         const result = await handler(
@@ -219,10 +227,9 @@ describe("sheetsTools", () => {
         expect(result).toContain("写入表格失败");
       });
 
-      it("SDK 抛出异常时应返回错误信息", async () => {
-        client.sheets.spreadsheetSheetValue.update.mockRejectedValueOnce(
-          new Error("范围超限"),
-        );
+      it("fetch 抛出异常时应返回错误信息", async () => {
+        const fetchMock = vi.fn().mockRejectedValue(new Error("范围超限"));
+        vi.stubGlobal("fetch", fetchMock);
 
         const handler = handlers.get("write_sheet")!;
         const result = await handler(
@@ -239,7 +246,9 @@ describe("sheetsTools", () => {
     });
 
     describe("append_sheet", () => {
-      it("应调用 SDK 追加数据并返回成功提示", async () => {
+      it("应调用飞书 HTTP API 追加数据并返回成功提示", async () => {
+        const fetchMock = mockFetchJson({ code: 0, data: {} });
+
         const values = JSON.stringify([["新数据", 100, "新部门"]]);
         const handler = handlers.get("append_sheet")!;
         const result = await handler(
@@ -250,15 +259,20 @@ describe("sheetsTools", () => {
           }),
         );
 
-        expect(client.sheets.spreadsheetSheetValue.append).toHaveBeenCalledOnce();
-        const callArgs = client.sheets.spreadsheetSheetValue.append.mock.calls[0][0];
-        expect(callArgs.data.valueRange.values).toEqual([["新数据", 100, "新部门"]]);
+        expect(fetchMock).toHaveBeenCalledOnce();
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(url).toContain("values_append");
+        expect(init.method).toBe("POST");
+        const body = JSON.parse(init.body);
+        expect(body.valueRange.values).toEqual([["新数据", 100, "新部门"]]);
 
         expect(result).toContain("成功追加");
         expect(result).toContain("1"); // 1 行
       });
 
-      it("values 格式错误时应返回提示", async () => {
+      it("values 格式错误时应返回提示且不发起请求", async () => {
+        const fetchMock = mockFetchJson({ code: 0, data: {} });
+
         const handler = handlers.get("append_sheet")!;
         const result = await handler(
           makeCtx({
@@ -269,14 +283,11 @@ describe("sheetsTools", () => {
         );
 
         expect(result).toContain("数据格式错误");
-        expect(client.sheets.spreadsheetSheetValue.append).not.toHaveBeenCalled();
+        expect(fetchMock).not.toHaveBeenCalled();
       });
 
-      it("SDK 返回非 0 code 时应返回错误信息", async () => {
-        client.sheets.spreadsheetSheetValue.append.mockResolvedValueOnce({
-          code: 40003,
-          msg: "无权限",
-        });
+      it("API 返回非 0 code 时应返回错误信息", async () => {
+        mockFetchJson({ code: 40003, msg: "无权限" });
 
         const handler = handlers.get("append_sheet")!;
         const result = await handler(
@@ -290,10 +301,9 @@ describe("sheetsTools", () => {
         expect(result).toContain("追加数据失败");
       });
 
-      it("SDK 抛出异常时应返回错误信息", async () => {
-        client.sheets.spreadsheetSheetValue.append.mockRejectedValueOnce(
-          new Error("追加失败"),
-        );
+      it("fetch 抛出异常时应返回错误信息", async () => {
+        const fetchMock = vi.fn().mockRejectedValue(new Error("追加失败"));
+        vi.stubGlobal("fetch", fetchMock);
 
         const handler = handlers.get("append_sheet")!;
         const result = await handler(
