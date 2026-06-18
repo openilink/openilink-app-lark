@@ -82,8 +82,8 @@ describe("LarkToWx", () => {
 
       expect(fetchMock).toHaveBeenCalledOnce();
       const [url, options] = fetchMock.mock.calls[0];
-      // HubClient 使用 /api/bot/send 端点
-      expect(url).toBe("http://hub.test/api/bot/send");
+      // HubClient 使用 /bot/v1/message/send 端点
+      expect(url).toBe("http://hub.test/bot/v1/message/send");
       expect(options.method).toBe("POST");
 
       const body = JSON.parse(options.body);

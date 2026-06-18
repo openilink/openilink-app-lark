@@ -6,8 +6,29 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createHmac } from "node:crypto";
 import { EventEmitter, Readable } from "node:stream";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { handleWebhook, type EventCallback } from "../../src/hub/webhook.js";
+import {
+  handleWebhook,
+  type EventCallback,
+  type CommandCallback,
+  type AsyncPushCallback,
+} from "../../src/hub/webhook.js";
 import type { Installation } from "../../src/hub/types.js";
+
+/**
+ * 构造 handleWebhook 所需的 callbacks 对象。
+ * 只有 onEvent 是各用例关心的，onCommand / onAsyncPush 用空实现占位。
+ */
+function makeCallbacks(onEvent: EventCallback): {
+  onCommand: CommandCallback;
+  onEvent: EventCallback;
+  onAsyncPush: AsyncPushCallback;
+} {
+  return {
+    onCommand: vi.fn(async () => null) as unknown as CommandCallback,
+    onEvent,
+    onAsyncPush: vi.fn(async () => {}) as unknown as AsyncPushCallback,
+  };
+}
 
 /**
  * 创建模拟的 IncomingMessage
@@ -89,7 +110,7 @@ describe("handleWebhook", () => {
       const store = createMockStore();
       const onEvent = vi.fn();
 
-      await handleWebhook(req, res, store, onEvent);
+      await handleWebhook(req, res, store, makeCallbacks(onEvent));
 
       expect(res._statusCode).toBe(200);
       const parsed = JSON.parse(res._body);
@@ -122,7 +143,7 @@ describe("handleWebhook", () => {
       const store = createMockStore(testInstallation);
       const onEvent: EventCallback = vi.fn();
 
-      await handleWebhook(req, res, store, onEvent);
+      await handleWebhook(req, res, store, makeCallbacks(onEvent));
 
       expect(res._statusCode).toBe(200);
       expect(onEvent).toHaveBeenCalledOnce();
@@ -151,7 +172,7 @@ describe("handleWebhook", () => {
       const store = createMockStore(testInstallation);
       const onEvent = vi.fn();
 
-      await handleWebhook(req, res, store, onEvent);
+      await handleWebhook(req, res, store, makeCallbacks(onEvent));
 
       expect(res._statusCode).toBe(401);
       expect(onEvent).not.toHaveBeenCalled();
@@ -174,7 +195,7 @@ describe("handleWebhook", () => {
       const store = createMockStore(testInstallation);
       const onEvent = vi.fn();
 
-      await handleWebhook(req, res, store, onEvent);
+      await handleWebhook(req, res, store, makeCallbacks(onEvent));
 
       expect(res._statusCode).toBe(401);
       expect(onEvent).not.toHaveBeenCalled();
@@ -182,7 +203,7 @@ describe("handleWebhook", () => {
   });
 
   describe("安装记录查找", () => {
-    it("找不到 installation 时应返回 404", async () => {
+    it("找不到 installation 时应返回 401（不泄露安装是否存在）", async () => {
       const bodyObj = {
         v: 1,
         type: "event",
@@ -202,11 +223,12 @@ describe("handleWebhook", () => {
       const store = createMockStore(undefined);
       const onEvent = vi.fn();
 
-      await handleWebhook(req, res, store, onEvent);
+      await handleWebhook(req, res, store, makeCallbacks(onEvent));
 
-      expect(res._statusCode).toBe(404);
+      // 安全加固：找不到安装记录时返回 401 unauthorized，不暴露其是否存在
+      expect(res._statusCode).toBe(401);
       const parsed = JSON.parse(res._body);
-      expect(parsed.error).toContain("安装记录不存在");
+      expect(parsed.error).toBe("unauthorized");
       expect(onEvent).not.toHaveBeenCalled();
     });
 
@@ -229,7 +251,7 @@ describe("handleWebhook", () => {
       const store = createMockStore();
       const onEvent = vi.fn();
 
-      await handleWebhook(req, res, store, onEvent);
+      await handleWebhook(req, res, store, makeCallbacks(onEvent));
 
       expect(res._statusCode).toBe(400);
     });
@@ -242,7 +264,7 @@ describe("handleWebhook", () => {
       const store = createMockStore();
       const onEvent = vi.fn();
 
-      await handleWebhook(req, res, store, onEvent);
+      await handleWebhook(req, res, store, makeCallbacks(onEvent));
 
       expect(res._statusCode).toBe(400);
       const parsed = JSON.parse(res._body);

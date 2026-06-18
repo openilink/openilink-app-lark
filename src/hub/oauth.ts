@@ -406,7 +406,10 @@ export async function handleOAuthRedirect(
     }
   } catch (err) {
     console.error("[oauth] 凭证交换异常:", err);
+    // 把底层原因透传给用户，否则只看到一句通用报错无从排查（常见原因：
+    // App 服务器无法连接 Hub、Hub 返回了非 JSON 响应、本地存储写入失败等）。
+    const detail = err instanceof Error ? err.message : String(err);
     res.writeHead(500, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "凭证交换过程发生异常" }));
+    res.end(JSON.stringify({ error: "凭证交换过程发生异常", detail }));
   }
 }

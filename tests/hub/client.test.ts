@@ -32,7 +32,7 @@ describe("HubClient", () => {
 
       expect(fetchMock).toHaveBeenCalledOnce();
       const [url, options] = fetchMock.mock.calls[0];
-      expect(url).toBe(`${hubUrl}/api/bot/send`);
+      expect(url).toBe(`${hubUrl}/bot/v1/message/send`);
       expect(options.method).toBe("POST");
       expect(options.headers["Content-Type"]).toBe("application/json");
       expect(options.headers["Authorization"]).toBe(`Bearer ${appToken}`);
@@ -64,20 +64,23 @@ describe("HubClient", () => {
 
       const body = JSON.parse(fetchMock.mock.calls[0][1].body);
       expect(body.type).toBe("image");
-      expect(body.content).toBe("https://example.com/photo.jpg");
+      // 图片 URL 放在 body.url，content 为空字符串
+      expect(body.url).toBe("https://example.com/photo.jpg");
+      expect(body.content).toBe("");
       expect(body.to).toBe("wx-user-001");
     });
   });
 
   describe("sendFile", () => {
-    it("应发送 file 类型的消息，content 为 JSON 字符串", async () => {
+    it("应发送 file 类型的消息，url 与 filename 为独立字段", async () => {
       await client.sendFile("wx-user-001", "https://example.com/doc.pdf", "文档.pdf");
 
       const body = JSON.parse(fetchMock.mock.calls[0][1].body);
       expect(body.type).toBe("file");
-      const content = JSON.parse(body.content);
-      expect(content.url).toBe("https://example.com/doc.pdf");
-      expect(content.name).toBe("文档.pdf");
+      // 文件 URL 与文件名作为独立字段，content 为空字符串
+      expect(body.url).toBe("https://example.com/doc.pdf");
+      expect(body.filename).toBe("文档.pdf");
+      expect(body.content).toBe("");
     });
   });
 

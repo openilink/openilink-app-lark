@@ -2,7 +2,9 @@
  * tools/vc.ts 测试
  * Mock lark.Client 验证视频会议工具的 handler 和定义
  *
- * 注意: 源码中使用可选链 client.vc?.meeting?.list/get 和 client.vc?.meetingMinute?.get
+ * 注意: 源码使用 client.vc?.meetingList?.get 获取会议列表，
+ * 使用 client.vc?.meeting?.get 获取单场会议信息；会议纪要不再单独请求，
+ * 而是返回引导用户通过文档 API（read_doc）获取纪要的提示。
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { vcTools } from "../../src/tools/vc.js";
@@ -12,8 +14,8 @@ import type { ToolContext } from "../../src/hub/types.js";
 function createMockLarkSdkClient() {
   return {
     vc: {
-      meeting: {
-        list: vi.fn().mockResolvedValue({
+      meetingList: {
+        get: vi.fn().mockResolvedValue({
           code: 0,
           data: {
             meeting_list: [
@@ -32,6 +34,8 @@ function createMockLarkSdkClient() {
             ],
           },
         }),
+      },
+      meeting: {
         get: vi.fn().mockResolvedValue({
           code: 0,
           data: {
@@ -39,16 +43,6 @@ function createMockLarkSdkClient() {
               topic: "周一例会",
               start_time: "2024-06-01 09:00",
               end_time: "2024-06-01 10:00",
-            },
-          },
-        }),
-      },
-      meetingMinute: {
-        get: vi.fn().mockResolvedValue({
-          code: 0,
-          data: {
-            minute: {
-              content: "1. 讨论了项目进度\n2. 确认下周计划",
             },
           },
         }),
@@ -111,7 +105,7 @@ describe("vcTools", () => {
         const handler = handlers.get("list_meetings")!;
         const result = await handler(makeCtx({}));
 
-        expect(client.vc.meeting.list).toHaveBeenCalledOnce();
+        expect(client.vc.meetingList.get).toHaveBeenCalledOnce();
         expect(result).toContain("2");
         expect(result).toContain("周一例会");
         expect(result).toContain("项目评审");
@@ -127,13 +121,13 @@ describe("vcTools", () => {
           }),
         );
 
-        const callArgs = client.vc.meeting.list.mock.calls[0][0];
+        const callArgs = client.vc.meetingList.get.mock.calls[0][0];
         expect(callArgs.params.start_time).toBe("2024-06-01");
         expect(callArgs.params.end_time).toBe("2024-06-30");
       });
 
       it("无会议记录时应返回提示", async () => {
-        client.vc.meeting.list.mockResolvedValueOnce({
+        client.vc.meetingList.get.mockResolvedValueOnce({
           code: 0,
           data: { meeting_list: [] },
         });
@@ -155,7 +149,7 @@ describe("vcTools", () => {
       });
 
       it("SDK 抛出异常时应返回错误信息", async () => {
-        client.vc.meeting.list.mockRejectedValueOnce(new Error("会议服务不可用"));
+        client.vc.meetingList.get.mockRejectedValueOnce(new Error("会议服务不可用"));
 
         const handler = handlers.get("list_meetings")!;
         const result = await handler(makeCtx({}));
@@ -166,7 +160,7 @@ describe("vcTools", () => {
     });
 
     describe("get_meeting_summary", () => {
-      it("应调用 SDK 获取会议信息和纪要并返回格式化结果", async () => {
+      it("应调用 SDK 获取会议信息并返回格式化结果及纪要获取指引", async () => {
         const handler = handlers.get("get_meeting_summary")!;
         const result = await handler(makeCtx({ meeting_id: "meeting_001" }));
 
@@ -176,32 +170,8 @@ describe("vcTools", () => {
 
         expect(result).toContain("周一例会");
         expect(result).toContain("meeting_001");
-        expect(result).toContain("讨论了项目进度");
-      });
-
-      it("纪要接口不可用时应返回默认值", async () => {
-        client.vc.meetingMinute.get.mockRejectedValueOnce(new Error("不可用"));
-
-        const handler = handlers.get("get_meeting_summary")!;
-        const result = await handler(makeCtx({ meeting_id: "meeting_001" }));
-
-        // 会议信息仍应正常返回
-        expect(result).toContain("周一例会");
-        // 纪要部分应为默认值
-        expect(result).toContain("暂无会议纪要");
-      });
-
-      it("纪要 API 返回非 0 code 时应使用默认值", async () => {
-        client.vc.meetingMinute.get.mockResolvedValueOnce({
-          code: 40003,
-          msg: "无权限",
-        });
-
-        const handler = handlers.get("get_meeting_summary")!;
-        const result = await handler(makeCtx({ meeting_id: "meeting_001" }));
-
-        expect(result).toContain("周一例会");
-        expect(result).toContain("暂无会议纪要");
+        // 纪要通过文档 API 获取，应给出 read_doc 指引
+        expect(result).toContain("read_doc");
       });
 
       it("会议信息 API 不可用时应返回错误提示", async () => {
@@ -211,7 +181,19 @@ describe("vcTools", () => {
         const handler = handlersNoVc.get("get_meeting_summary")!;
         const result = await handler(makeCtx({ meeting_id: "meeting_001" }));
 
-        expect(result).toContain("获取会议纪要失败");
+        expect(result).toContain("获取会议信息失败");
+      });
+
+      it("SDK 返回非 0 code 时应返回错误提示", async () => {
+        client.vc.meeting.get.mockResolvedValueOnce({
+          code: 40003,
+          msg: "无权限",
+        });
+
+        const handler = handlers.get("get_meeting_summary")!;
+        const result = await handler(makeCtx({ meeting_id: "meeting_001" }));
+
+        expect(result).toContain("获取会议信息失败");
       });
 
       it("SDK 抛出异常时应返回错误信息", async () => {
@@ -220,7 +202,7 @@ describe("vcTools", () => {
         const handler = handlers.get("get_meeting_summary")!;
         const result = await handler(makeCtx({ meeting_id: "invalid" }));
 
-        expect(result).toContain("获取会议纪要失败");
+        expect(result).toContain("获取会议信息失败");
         expect(result).toContain("会议不存在");
       });
     });

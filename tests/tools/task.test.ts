@@ -128,7 +128,8 @@ describe("taskTools", () => {
 
         const callArgs = client.task.task.create.mock.calls[0][0];
         expect(callArgs.data.due).toBeDefined();
-        expect(callArgs.data.due.timestamp).toBeDefined();
+        // 飞书 Task API 截止时间字段为 time（秒级时间戳字符串），而非 timestamp
+        expect(callArgs.data.due.time).toBeDefined();
         expect(callArgs.data.due.is_all_day).toBe(false);
       });
 

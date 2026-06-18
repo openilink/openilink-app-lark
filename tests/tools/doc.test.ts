@@ -27,31 +27,9 @@ function createMockLarkSdkClient() {
           data: { content: "这是文档正文内容" },
         }),
       },
-      documentBlock: {
+      // create_doc 提供 content 时通过 documentBlockChildren.create 在根节点下追加文本 block
+      documentBlockChildren: {
         create: vi.fn().mockResolvedValue({ code: 0 }),
-      },
-    },
-    // search_doc 实际使用 client.search?.message?.create
-    search: {
-      message: {
-        create: vi.fn().mockResolvedValue({
-          code: 0,
-          msg: "success",
-          data: {
-            items: [
-              {
-                title: "测试文档",
-                docs_type: "docx",
-                url: "https://lark.com/doc/001",
-              },
-              {
-                title: "另一个文档",
-                docs_type: "doc",
-                url: "https://lark.com/doc/002",
-              },
-            ],
-          },
-        }),
       },
     },
   } as any;
@@ -129,7 +107,7 @@ describe("docTools", () => {
         await handler(makeCtx({ title: "带内容文档", content: "正文内容" }));
 
         expect(client.docx.document.create).toHaveBeenCalledOnce();
-        expect(client.docx.documentBlock.create).toHaveBeenCalledOnce();
+        expect(client.docx.documentBlockChildren.create).toHaveBeenCalledOnce();
       });
 
       it("提供 folder_token 时应传递给 SDK", async () => {
@@ -222,56 +200,22 @@ describe("docTools", () => {
     });
 
     describe("search_doc", () => {
-      it("搜索到结果时应返回格式化列表", async () => {
+      // 文档搜索依赖飞书通用搜索 API（suite_search），当前 SDK 未直接暴露该接口，
+      // 因此 handler 直接返回引导用户使用飞书客户端搜索的提示，不调用任何 SDK 方法。
+      it("应返回暂不支持搜索的提示，并包含搜索关键词", async () => {
         const handler = handlers.get("search_doc")!;
         const result = await handler(makeCtx({ query: "测试" }));
 
-        expect(client.search.message.create).toHaveBeenCalledOnce();
-        expect(result).toContain("测试文档");
-        expect(result).toContain("另一个文档");
-        expect(result).toContain("2");
+        expect(result).toContain("暂不支持");
+        expect(result).toContain("测试");
       });
 
-      it("无搜索结果时应返回提示", async () => {
-        client.search.message.create.mockResolvedValueOnce({
-          code: 0,
-          msg: "success",
-          data: { items: [] },
-        });
-
+      it("提示中应引导用户通过飞书客户端搜索", async () => {
         const handler = handlers.get("search_doc")!;
-        const result = await handler(makeCtx({ query: "不存在的文档" }));
+        const result = await handler(makeCtx({ query: "周报" }));
 
-        expect(result).toContain("未找到");
-      });
-
-      it("API 不可用时应返回暂不可用提示", async () => {
-        // 模拟 search 为 undefined（API 不可用）
-        const clientNoSearch = { ...client, search: undefined } as any;
-        const handlersNoSearch = docTools.createHandlers(clientNoSearch);
-        const handler = handlersNoSearch.get("search_doc")!;
-        const result = await handler(makeCtx({ query: "测试" }));
-
-        // 源码中 client.search?.message?.create? 返回 undefined 时给出暂不可用提示
-        expect(result).toContain("暂不可用");
-      });
-
-      it("count 应限制在 50 以内", async () => {
-        const handler = handlers.get("search_doc")!;
-        await handler(makeCtx({ query: "测试", count: 200 }));
-
-        const callArgs = client.search.message.create.mock.calls[0][0];
-        expect(callArgs.data.page_size).toBe(50);
-      });
-
-      it("SDK 抛出异常时应返回错误信息", async () => {
-        client.search.message.create.mockRejectedValueOnce(new Error("搜索超时"));
-
-        const handler = handlers.get("search_doc")!;
-        const result = await handler(makeCtx({ query: "测试" }));
-
-        expect(result).toContain("搜索文档出错");
-        expect(result).toContain("搜索超时");
+        expect(result).toContain("飞书客户端");
+        expect(result).toContain("周报");
       });
     });
   });

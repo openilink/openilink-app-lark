@@ -26,25 +26,27 @@ describe("loadConfig", () => {
   });
 
   it("缺少所有必填项时应抛出错误，并列出全部缺失项", () => {
-    expect(() => loadConfig()).toThrowError("缺少必填环境变量: HUB_URL, BASE_URL, LARK_APP_ID, LARK_APP_SECRET");
+    // 云端托管模式下仅 HUB_URL / BASE_URL 为必填，飞书凭证由用户安装时填写
+    expect(() => loadConfig()).toThrowError("缺少必填环境变量: HUB_URL, BASE_URL");
   });
 
   it("缺少 HUB_URL 时应抛出错误", () => {
-    process.env.LARK_APP_ID = "test-id";
-    process.env.LARK_APP_SECRET = "test-secret";
+    process.env.BASE_URL = "http://app.test";
     expect(() => loadConfig()).toThrowError("HUB_URL");
   });
 
-  it("缺少 LARK_APP_ID 时应抛出错误", () => {
+  it("缺少 BASE_URL 时应抛出错误", () => {
     process.env.HUB_URL = "http://hub.test";
-    process.env.LARK_APP_SECRET = "test-secret";
-    expect(() => loadConfig()).toThrowError("LARK_APP_ID");
+    expect(() => loadConfig()).toThrowError("BASE_URL");
   });
 
-  it("缺少 LARK_APP_SECRET 时应抛出错误", () => {
+  it("仅提供 HUB_URL 和 BASE_URL（无飞书凭证）时也应成功加载", () => {
+    // 飞书凭证为可选，云端托管模式下由用户在安装时填写
     process.env.HUB_URL = "http://hub.test";
-    process.env.LARK_APP_ID = "test-id";
-    expect(() => loadConfig()).toThrowError("LARK_APP_SECRET");
+    process.env.BASE_URL = "http://app.test";
+    const cfg = loadConfig();
+    expect(cfg.larkAppId).toBe("");
+    expect(cfg.larkAppSecret).toBe("");
   });
 
   it("提供所有必填项后应正确加载默认值", () => {

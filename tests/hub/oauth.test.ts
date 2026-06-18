@@ -11,16 +11,39 @@ import type { Config } from "../../src/config.js";
 /** 创建模拟的 IncomingMessage */
 function createMockReq(
   urlPath: string,
-  headers: Record<string, string> = {},
+  opts: { method?: string; body?: string; headers?: Record<string, string> } = {},
 ): IncomingMessage {
+  const { method = "GET", body = "", headers = {} } = opts;
   const readable = new Readable({
     read() {
+      if (body) this.push(body);
       this.push(null);
     },
   });
+  (readable as any).method = method;
   (readable as any).headers = { host: "localhost:8081", ...headers };
   (readable as any).url = urlPath;
   return readable as unknown as IncomingMessage;
+}
+
+/**
+ * 驱动真实的 setup → redirect 流程：POST 配置表单生成 PKCE 缓存，
+ * 从重定向 Location 中解析出实际生成的随机 state。
+ * 返回可用于 /oauth/redirect 的 state。
+ */
+async function runSetupAndGetState(
+  query: string,
+  formBody = "lark_app_id=cli_x&lark_app_secret=sec_x",
+): Promise<string> {
+  const setupReq = createMockReq(`/oauth/setup?${query}`, {
+    method: "POST",
+    body: formBody,
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+  });
+  const setupRes = createMockRes();
+  await handleOAuthSetup(setupReq, setupRes, testConfig);
+  const location = setupRes._headers["Location"] ?? setupRes._headers["location"] ?? "";
+  return new URL(location).searchParams.get("state") ?? "";
 }
 
 /** 创建模拟的 ServerResponse，捕获状态码和响应体 */
@@ -50,6 +73,8 @@ function createMockStore() {
     saveInstallation: vi.fn(),
     getInstallation: vi.fn(),
     getAllInstallations: vi.fn().mockReturnValue([]),
+    saveConfig: vi.fn(),
+    getConfig: vi.fn().mockReturnValue({}),
     saveMessageLink: vi.fn(),
     getMessageLinkByLarkId: vi.fn(),
     getLatestLinkByWxUser: vi.fn(),
@@ -69,88 +94,82 @@ const testConfig: Config = {
 };
 
 describe("handleOAuthSetup", () => {
-  it("参数完整时应生成 PKCE 并重定向到 Hub 授权页", () => {
+  it("GET 请求应返回配置表单 HTML", async () => {
     const req = createMockReq(
       "/oauth/setup?hub=http://hub.test&app_id=app-123&bot_id=bot-456&state=test-state-001",
     );
     const res = createMockRes();
 
-    handleOAuthSetup(req, res, testConfig);
+    await handleOAuthSetup(req, res, testConfig);
+
+    expect(res._statusCode).toBe(200);
+    expect(res._headers["Content-Type"]).toContain("text/html");
+    // 表单提交回 /oauth/setup
+    expect(res._body).toContain('method="POST"');
+    expect(res._body).toContain("lark_app_id");
+  });
+
+  it("POST 表单完整时应生成 PKCE 并重定向到 Hub 授权页", async () => {
+    const req = createMockReq(
+      "/oauth/setup?hub=http://hub.test&app_id=app-123&bot_id=bot-456&state=test-state-001",
+      {
+        method: "POST",
+        body: "lark_app_id=cli_x&lark_app_secret=sec_x&lark_chat_id=oc_x",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+      },
+    );
+    const res = createMockRes();
+
+    await handleOAuthSetup(req, res, testConfig);
 
     // 应返回 302 重定向
     expect(res._statusCode).toBe(302);
-    // Location 应指向 Hub 的授权地址
+    // Location 应指向 Hub 的授权地址（按 query 参数精确断言，避免 hub_state 误满足 state）
     const location = res._headers["Location"] ?? res._headers["location"] ?? "";
-    expect(location).toContain("http://hub.test/api/oauth/authorize");
-    expect(location).toContain("app_id=app-123");
-    expect(location).toContain("bot_id=bot-456");
-    expect(location).toContain("state=test-state-001");
-    // 应包含 code_challenge
-    expect(location).toContain("code_challenge=");
-    // 应包含 redirect_uri
-    expect(location).toContain("redirect_uri=");
+    const auth = new URL(location);
+    expect(auth.origin + auth.pathname).toBe("http://hub.test/api/apps/app-123/oauth/authorize");
+    expect(auth.searchParams.get("bot_id")).toBe("bot-456");
+    // hub_state 透传原始 state
+    expect(auth.searchParams.get("hub_state")).toBe("test-state-001");
+    expect(auth.searchParams.get("code_challenge")).toBeTruthy();
+    // 本地 PKCE state 是新生成的 16 字节 hex，且不等于透传的 hub_state
+    const localState = auth.searchParams.get("state");
+    expect(localState).toMatch(/^[a-f0-9]{32}$/);
+    expect(localState).not.toBe("test-state-001");
   });
 
-  it("提供 return_url 时应传递给 Hub", () => {
-    const req = createMockReq(
-      "/oauth/setup?hub=http://hub.test&app_id=app-123&bot_id=bot-456&state=st-002&return_url=http://mysite.com/done",
-    );
-    const res = createMockRes();
-
-    handleOAuthSetup(req, res, testConfig);
-
-    expect(res._statusCode).toBe(302);
-    const location = res._headers["Location"] ?? "";
-    expect(location).toContain("return_url=");
-  });
-
-  it("缺少 app_id 参数时应返回 400", () => {
+  it("POST 缺少 app_id 参数时应返回 400", async () => {
     const req = createMockReq(
       "/oauth/setup?hub=http://hub.test&bot_id=bot-456&state=st-003",
+      {
+        method: "POST",
+        body: "lark_app_id=cli_x&lark_app_secret=sec_x",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+      },
     );
     const res = createMockRes();
 
-    handleOAuthSetup(req, res, testConfig);
+    await handleOAuthSetup(req, res, testConfig);
 
     expect(res._statusCode).toBe(400);
     const parsed = JSON.parse(res._body);
     expect(parsed.error).toContain("缺少必填参数");
   });
 
-  it("缺少 bot_id 参数时应返回 400", () => {
+  it("POST 缺少 bot_id 参数时应返回 400", async () => {
     const req = createMockReq(
       "/oauth/setup?hub=http://hub.test&app_id=app-123&state=st-004",
+      {
+        method: "POST",
+        body: "lark_app_id=cli_x&lark_app_secret=sec_x",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+      },
     );
     const res = createMockRes();
 
-    handleOAuthSetup(req, res, testConfig);
+    await handleOAuthSetup(req, res, testConfig);
 
     expect(res._statusCode).toBe(400);
-  });
-
-  it("缺少 state 参数时应返回 400", () => {
-    const req = createMockReq(
-      "/oauth/setup?hub=http://hub.test&app_id=app-123&bot_id=bot-456",
-    );
-    const res = createMockRes();
-
-    handleOAuthSetup(req, res, testConfig);
-
-    expect(res._statusCode).toBe(400);
-  });
-
-  it("hub 参数缺失时应使用 config.hubUrl 作为后备", () => {
-    const req = createMockReq(
-      "/oauth/setup?app_id=app-123&bot_id=bot-456&state=st-005",
-    );
-    const res = createMockRes();
-
-    handleOAuthSetup(req, res, testConfig);
-
-    expect(res._statusCode).toBe(302);
-    const location = res._headers["Location"] ?? "";
-    // 应使用 config 中的 hubUrl
-    expect(location).toContain("http://hub.test/api/oauth/authorize");
   });
 });
 
@@ -204,13 +223,10 @@ describe("handleOAuthRedirect", () => {
   });
 
   it("成功换取凭证时应保存安装信息并返回 200", async () => {
-    // 先通过 setup 生成 PKCE 缓存
-    const setupReq = createMockReq(
-      "/oauth/setup?hub=http://hub.test&app_id=app-123&bot_id=bot-456&state=valid-state-001",
+    // 先通过 setup 生成 PKCE 缓存，拿到实际生成的 state
+    const state = await runSetupAndGetState(
+      "hub=http://hub.test&app_id=app-123&bot_id=bot-456&state=valid-state-001",
     );
-    const setupRes = createMockRes();
-    handleOAuthSetup(setupReq, setupRes, testConfig);
-    expect(setupRes._statusCode).toBe(302);
 
     // Mock fetch 返回成功
     const mockExchangeResult = {
@@ -226,7 +242,7 @@ describe("handleOAuthRedirect", () => {
     } as any);
 
     const redirectReq = createMockReq(
-      "/oauth/redirect?code=auth-code-001&state=valid-state-001",
+      `/oauth/redirect?code=auth-code-001&state=${state}`,
     );
     const redirectRes = createMockRes();
     const store = createMockStore();
@@ -248,11 +264,9 @@ describe("handleOAuthRedirect", () => {
 
   it("Hub 返回错误时应返回 502", async () => {
     // 先生成 PKCE 缓存
-    const setupReq = createMockReq(
-      "/oauth/setup?hub=http://hub.test&app_id=app-123&bot_id=bot-456&state=valid-state-502",
+    const state = await runSetupAndGetState(
+      "hub=http://hub.test&app_id=app-123&bot_id=bot-456&state=valid-state-502",
     );
-    const setupRes = createMockRes();
-    handleOAuthSetup(setupReq, setupRes, testConfig);
 
     // Mock fetch 返回 HTTP 错误
     globalThis.fetch = vi.fn().mockResolvedValue({
@@ -262,7 +276,7 @@ describe("handleOAuthRedirect", () => {
     } as any);
 
     const redirectReq = createMockReq(
-      "/oauth/redirect?code=bad-code&state=valid-state-502",
+      `/oauth/redirect?code=bad-code&state=${state}`,
     );
     const redirectRes = createMockRes();
     const store = createMockStore();
@@ -278,17 +292,15 @@ describe("handleOAuthRedirect", () => {
 
   it("fetch 抛出异常时应返回 500", async () => {
     // 先生成 PKCE 缓存
-    const setupReq = createMockReq(
-      "/oauth/setup?hub=http://hub.test&app_id=app-123&bot_id=bot-456&state=valid-state-500",
+    const state = await runSetupAndGetState(
+      "hub=http://hub.test&app_id=app-123&bot_id=bot-456&state=valid-state-500",
     );
-    const setupRes = createMockRes();
-    handleOAuthSetup(setupReq, setupRes, testConfig);
 
     // Mock fetch 抛出网络异常
     globalThis.fetch = vi.fn().mockRejectedValue(new Error("网络连接失败"));
 
     const redirectReq = createMockReq(
-      "/oauth/redirect?code=some-code&state=valid-state-500",
+      `/oauth/redirect?code=some-code&state=${state}`,
     );
     const redirectRes = createMockRes();
     const store = createMockStore();
@@ -298,16 +310,16 @@ describe("handleOAuthRedirect", () => {
     expect(redirectRes._statusCode).toBe(500);
     const parsed = JSON.parse(redirectRes._body);
     expect(parsed.error).toContain("异常");
+    // 底层原因应透传给用户，方便排查（网络不通 / Hub 不可达等）
+    expect(parsed.detail).toContain("网络连接失败");
     expect(store.saveInstallation).not.toHaveBeenCalled();
   });
 
   it("同一 state 不可重复使用（PKCE 一次性）", async () => {
     // 生成 PKCE 缓存
-    const setupReq = createMockReq(
-      "/oauth/setup?hub=http://hub.test&app_id=app-123&bot_id=bot-456&state=one-time-state",
+    const state = await runSetupAndGetState(
+      "hub=http://hub.test&app_id=app-123&bot_id=bot-456&state=one-time-state",
     );
-    const setupRes = createMockRes();
-    handleOAuthSetup(setupReq, setupRes, testConfig);
 
     // 第一次使用 - 成功
     globalThis.fetch = vi.fn().mockResolvedValue({
@@ -322,7 +334,7 @@ describe("handleOAuthRedirect", () => {
     } as any);
 
     const req1 = createMockReq(
-      "/oauth/redirect?code=code1&state=one-time-state",
+      `/oauth/redirect?code=code1&state=${state}`,
     );
     const res1 = createMockRes();
     const store = createMockStore();
@@ -331,7 +343,7 @@ describe("handleOAuthRedirect", () => {
 
     // 第二次使用同一 state - 应失败
     const req2 = createMockReq(
-      "/oauth/redirect?code=code2&state=one-time-state",
+      `/oauth/redirect?code=code2&state=${state}`,
     );
     const res2 = createMockRes();
     await handleOAuthRedirect(req2, res2, testConfig, store);
